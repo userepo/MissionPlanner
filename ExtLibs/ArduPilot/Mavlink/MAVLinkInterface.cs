@@ -5974,228 +5974,262 @@ Mission Planner waits for 2 valid heartbeat packets before connecting
             return new FileStream(await GetLog(MAV.sysid, MAV.compid, no), FileMode.Open, FileAccess.ReadWrite);
         }
 
-        public async Task<string> GetLog(byte sysid, byte compid, ushort no)
+        public async Task<string> GetLog(byte sysid, byte compid, ushort no, CancellationToken cancel = default)
         {
             var filename = Path.GetTempFileName();
-            using (FileStream ms = new FileStream(filename, FileMode.Create, FileAccess.ReadWrite))
+
+            ConcurrentQueue<MAVLinkMessage> queue = new ConcurrentQueue<MAVLinkMessage>();
+            SemaphoreSlim queuesignal = new SemaphoreSlim(0);
+            EventHandler<MAVLinkMessage> handler = (sender, msg) =>
             {
-                Hashtable set = new Hashtable();
-
-                giveComport = false;
-                MAVLinkMessage buffer = MAVLinkMessage.Invalid;
-
-                if (Progress != null)
-                {
-                    Progress((int) 0, "");
-                }
-
-                uint totallength = 0;
-                uint ofs = 0;
-                uint bps = 0;
-                DateTime bpstimer = DateTime.Now;
-
-                ConcurrentQueue<MAVLinkMessage> queue = new ConcurrentQueue<MAVLinkMessage>();
-                EventHandler<MAVLinkMessage> handler = (sender, msg) =>
+                if (msg.msgid == (byte) MAVLINK_MSG_ID.LOG_DATA)
                 {
                     queue.Enqueue(msg);
-                };
-                OnPacketReceived += handler;
-
-                _OnPacketReceived.GetInvocationList().ForEach(a => log.Info(a.GetMethodInfo().ToJSON()));
-                
-
-                mavlink_log_request_data_t req = new mavlink_log_request_data_t();
-
-                req.target_component = compid;
-                req.target_system = sysid;
-                req.id = no;
-                req.ofs = ofs;
-                // entire log
-                req.count = 0xFFFFFFFF;
-
-                // request point
-                generatePacket((byte) MAVLINK_MSG_ID.LOG_REQUEST_DATA, req);
-
-                DateTime start = DateTime.Now;
-                int retrys = 3;
-
-
-                while (true)
-                {
-                    if (!(start.AddMilliseconds(3000) > DateTime.Now))
+                    try
                     {
-                        if (retrys > 0)
+                        queuesignal.Release();
+                    }
+                    catch (ObjectDisposedException)
+                    {
+                        // packet arrived after this download already finished
+                    }
+                }
+            };
+            OnPacketReceived += handler;
+
+            try
+            {
+                using (FileStream ms = new FileStream(filename, FileMode.Create, FileAccess.ReadWrite))
+                {
+                    // received 90-byte block numbers; every block below lowestmissing is known received
+                    HashSet<uint> set = new HashSet<uint>();
+                    uint lowestmissing = 0;
+
+                    giveComport = false;
+                    MAVLinkMessage buffer = MAVLinkMessage.Invalid;
+
+                    if (Progress != null)
+                    {
+                        Progress((int) 0, "");
+                    }
+
+                    uint totallength = 0;
+                    uint maxend = 0;
+                    uint ofs = 0;
+                    uint bps = 0;
+                    DateTime bpstimer = DateTime.Now;
+
+                    mavlink_log_request_data_t req = new mavlink_log_request_data_t();
+
+                    req.target_component = compid;
+                    req.target_system = sysid;
+                    req.id = no;
+                    req.ofs = ofs;
+                    // entire log
+                    req.count = 0xFFFFFFFF;
+
+                    // request point
+                    generatePacket((byte) MAVLINK_MSG_ID.LOG_REQUEST_DATA, req);
+
+                    DateTime start = DateTime.Now;
+                    int retrys = 3;
+
+
+                    while (true)
+                    {
+                        cancel.ThrowIfCancellationRequested();
+
+                        if (!(start.AddMilliseconds(3000) > DateTime.Now))
                         {
-                            log.Info("GetLog Retry " + retrys + " - giv com " + giveComport);
-                            generatePacket((byte) MAVLINK_MSG_ID.LOG_REQUEST_DATA, req);
-                            start = DateTime.Now;
-                            retrys--;
+                            if (retrys > 0)
+                            {
+                                log.Info("GetLog Retry " + retrys + " - giv com " + giveComport);
+                                generatePacket((byte) MAVLINK_MSG_ID.LOG_REQUEST_DATA, req);
+                                start = DateTime.Now;
+                                retrys--;
+                                continue;
+                            }
+
+                            giveComport = false;
+                            throw new TimeoutException("Timeout on read - GetLog");
+                        }
+
+                        if (!queue.TryDequeue(out buffer))
+                        {
+                            // wait for the next LOG_DATA packet instead of polling
+                            await queuesignal.WaitAsync(100, cancel).ConfigureAwait(false);
                             continue;
                         }
 
-                        giveComport = false;
-                        OnPacketReceived -= handler;
-                        throw new TimeoutException("Timeout on read - GetLog");
-                    }
-
-                    var start1 = DateTime.Now;
-                    if (!queue.TryDequeue(out buffer))
-                    {
-                        Thread.Sleep(10);
-                        buffer = MAVLinkMessage.Invalid;
-                    }
-                    var end = DateTime.Now - start1;
-                    var lapse = end.TotalMilliseconds;
-                    //Console.WriteLine("readPacketAsync: " + lapse);
-                    if (buffer.Length > 5)
-                    {
-                        if (buffer.msgid == (byte) MAVLINK_MSG_ID.LOG_DATA && buffer.sysid == req.target_system &&
-                            buffer.compid == req.target_component)
+                        if (buffer.Length > 5)
                         {
-                            var data = buffer.ToStructure<mavlink_log_data_t>();
-
-                            if (data.id != no)
-                                continue;
-
-                            // reset retrys
-                            retrys = 3;
-                            start = DateTime.Now;
-
-                            bps += data.count;
-
-                            // record what we have received
-                            set[(data.ofs / 90).ToString()] = 1;
-
-                            if (ms.Position != data.ofs)
-                                ms.Seek((long) data.ofs, SeekOrigin.Begin);
-                            ms.Write(data.data, 0, data.count);
-
-                            // update new start point
-                            req.ofs = data.ofs + data.count;
-
-                            if (bpstimer.Second != DateTime.Now.Second)
+                            if (buffer.msgid == (byte) MAVLINK_MSG_ID.LOG_DATA && buffer.sysid == req.target_system &&
+                                buffer.compid == req.target_component)
                             {
-                                if (Progress != null)
+                                var data = buffer.ToStructure<mavlink_log_data_t>();
+
+                                if (data.id != no)
+                                    continue;
+
+                                // reset retrys
+                                retrys = 3;
+                                start = DateTime.Now;
+
+                                bps += data.count;
+
+                                // record what we have received
+                                set.Add(data.ofs / 90);
+                                while (set.Contains(lowestmissing))
+                                    lowestmissing++;
+                                maxend = Math.Max(maxend, data.ofs + data.count);
+
+                                if (ms.Position != data.ofs)
+                                    ms.Seek((long) data.ofs, SeekOrigin.Begin);
+                                ms.Write(data.data, 0, data.count);
+
+                                // update new start point
+                                req.ofs = data.ofs + data.count;
+
+                                if (bpstimer.Second != DateTime.Now.Second)
                                 {
-                                    Progress((int) req.ofs, "");
+                                    if (Progress != null)
+                                    {
+                                        Progress((int) req.ofs, "");
+                                    }
+
+                                    //Console.WriteLine("log dl bps: " + bps.ToString());
+                                    bpstimer = DateTime.Now;
+                                    bps = 0;
                                 }
 
-                                //Console.WriteLine("log dl bps: " + bps.ToString());
-                                bpstimer = DateTime.Now;
-                                bps = 0;
-                            }
-
-                            // if data is less than max packet size or 0 > exit
-                            if (data.count < 90 || data.count == 0)
-                            {
-                                totallength = data.ofs + data.count;
-                                log.Info("start fillin len " + totallength + " count " + set.Count + " datalen " +
-                                         data.count);
-                                break;
+                                // a short or empty packet ends the log, but only trust it at the highest
+                                // offset seen - a reordered short packet must not truncate the download
+                                if (data.count < 90 && data.ofs + data.count >= maxend)
+                                {
+                                    totallength = maxend;
+                                    log.Info("start fillin len " + totallength + " count " + set.Count + " datalen " +
+                                             data.count);
+                                    break;
+                                }
                             }
                         }
                     }
-                }
 
-                log.Info("set count " + set.Count);
-                log.Info("count total " + ((totallength) / 90 + 1));
-                log.Info("totallength " + totallength);
-                log.Info("current length " + ms.Length);
+                    // blocks 0..totalblocks-1 must all be present before the download is complete
+                    uint totalblocks = (totallength + 89) / 90;
 
-                while (true && ((BaseStream != null && BaseStream.IsOpen) || logreadmode))
-                {
-                    if (totallength == ms.Length && set.Count >= ((totallength) / 90 + 1))
+                    log.Info("set count " + set.Count);
+                    log.Info("count total " + totalblocks);
+                    log.Info("totallength " + totallength);
+                    log.Info("current length " + ms.Length);
+
+                    while ((BaseStream != null && BaseStream.IsOpen) || logreadmode)
                     {
-                        giveComport = false;
-                        OnPacketReceived -= handler;
-                        return filename;
-                    }
+                        cancel.ThrowIfCancellationRequested();
 
-                    if (!(start.AddMilliseconds(500) > DateTime.Now))
-                    {
-                        for (int a = 0; a < ((totallength) / 90 + 1); a++)
+                        if (ms.Length >= totallength && lowestmissing >= totalblocks)
                         {
-                            if (!set.ContainsKey(a.ToString()))
+                            giveComport = false;
+                            return filename;
+                        }
+
+                        if (!(start.AddMilliseconds(500) > DateTime.Now))
+                        {
+                            if (lowestmissing < totalblocks)
                             {
                                 // request large chunk if they are back to back
                                 uint bytereq = 90;
-                                int b = a + 1;
-                                while (!set.ContainsKey(b.ToString()))
+                                uint b = lowestmissing + 1;
+                                while (b < totalblocks && !set.Contains(b))
                                 {
                                     bytereq += 90;
                                     b++;
                                 }
 
-                                req.ofs = (uint) (a * 90);
+                                req.ofs = lowestmissing * 90;
                                 req.count = bytereq;
                                 log.Info("req missing " + req.ofs + " bytes " + req.count + " got " + set.Count + "/" +
-                                         ((totallength) / 90 + 1));
+                                         totalblocks);
                                 generatePacket((byte) MAVLINK_MSG_ID.LOG_REQUEST_DATA, req);
                                 start = DateTime.Now;
-                                break;
                             }
                         }
-                    }
 
-                    if (!queue.TryDequeue(out buffer))
-                    {
-                        Thread.Sleep(10);
-                        buffer = MAVLinkMessage.Invalid;
-                    }
-                    if (buffer.Length > 5)
-                    {
-                        if (buffer.msgid == (byte) MAVLINK_MSG_ID.LOG_DATA && buffer.sysid == req.target_system &&
-                            buffer.compid == req.target_component)
+                        if (!queue.TryDequeue(out buffer))
                         {
-                            var data = buffer.ToStructure<mavlink_log_data_t>();
+                            // wait for the next LOG_DATA packet instead of polling
+                            await queuesignal.WaitAsync(100, cancel).ConfigureAwait(false);
+                            continue;
+                        }
 
-                            if (data.id != no)
-                                continue;
-
-                            // reset retrys
-                            retrys = 3;
-                            start = DateTime.Now;
-
-                            bps += data.count;
-
-                            // record what we have received
-                            set[(data.ofs / 90).ToString()] = 1;
-
-                            ms.Seek((long) data.ofs, SeekOrigin.Begin);
-                            ms.Write(data.data, 0, data.count);
-
-                            // update new start point
-                            req.ofs = data.ofs + data.count;
-
-                            if (bpstimer.Second != DateTime.Now.Second)
+                        if (buffer.Length > 5)
+                        {
+                            if (buffer.msgid == (byte) MAVLINK_MSG_ID.LOG_DATA && buffer.sysid == req.target_system &&
+                                buffer.compid == req.target_component)
                             {
-                                if (Progress != null)
+                                var data = buffer.ToStructure<mavlink_log_data_t>();
+
+                                if (data.id != no)
+                                    continue;
+
+                                // reset retrys
+                                retrys = 3;
+                                start = DateTime.Now;
+
+                                bps += data.count;
+
+                                // record what we have received
+                                set.Add(data.ofs / 90);
+                                while (set.Contains(lowestmissing))
+                                    lowestmissing++;
+
+                                ms.Seek((long) data.ofs, SeekOrigin.Begin);
+                                ms.Write(data.data, 0, data.count);
+
+                                // update new start point
+                                req.ofs = data.ofs + data.count;
+
+                                if (bpstimer.Second != DateTime.Now.Second)
                                 {
-                                    Progress((int) req.ofs, "");
+                                    if (Progress != null)
+                                    {
+                                        Progress((int) req.ofs, "");
+                                    }
+
+                                    //Console.WriteLine("log dl bps: " + bps.ToString());
+                                    bpstimer = DateTime.Now;
+                                    bps = 0;
                                 }
 
-                                //Console.WriteLine("log dl bps: " + bps.ToString());
-                                bpstimer = DateTime.Now;
-                                bps = 0;
-                            }
-
-                            // check if we have next set and invalidate to request next packets
-                            if (set.ContainsKey(((data.ofs / 90) + 1).ToString()))
-                            {
-                                start = DateTime.MinValue;
-                            }
-
-                            // if data is less than max packet size or 0 > exit
-                            if (data.count < 90 || data.count == 0)
-                            {
-                                continue;
+                                // check if we have next set and invalidate to request next packets
+                                if (set.Contains((data.ofs / 90) + 1))
+                                {
+                                    start = DateTime.MinValue;
+                                }
                             }
                         }
                     }
+
+                    throw new Exception("Failed to get log");
+                }
+            }
+            catch
+            {
+                // dont leave a partial temp file behind on timeout/cancel/link loss
+                try
+                {
+                    File.Delete(filename);
+                }
+                catch
+                {
                 }
 
+                throw;
+            }
+            finally
+            {
                 OnPacketReceived -= handler;
-                throw new Exception("Failed to get log");
+                queuesignal.Dispose();
             }
         }
 
