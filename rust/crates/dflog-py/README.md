@@ -41,10 +41,14 @@ It builds the abi3 cdylib with cargo, stages it as `dflog.pyd` on
 `rust/testdata`.
 
 Wheels are built with [maturin](https://github.com/PyO3/maturin) from this
-directory (`maturin build --release`); the abi3-py39 target produces one
-wheel per platform covering CPython 3.9+. The crate is not in the
-workspace's `default-members`, so plain `cargo build`/`cargo test` at the
-workspace root never require a Python toolchain.
+directory (`pip install "maturin>=1.15,<2"`, then `maturin build
+--release`); the abi3-py39 target produces one wheel per platform covering
+CPython 3.9+, e.g. `rust/target/wheels/dflog-<version>-cp39-abi3-win_amd64.whl`
+(~180 KB, numpy declared as its only dependency). Verify a wheel by
+installing it into a fresh venv and running `tests/test_dflog.py` with
+that interpreter. The crate is not in the workspace's `default-members`,
+so plain `cargo build`/`cargo test` at the workspace root never require a
+Python toolchain.
 
 ## Benchmark vs pymavlink DFReader
 
