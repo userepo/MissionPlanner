@@ -1,0 +1,9 @@
+count=0
+seen=
+gpsstarttime=0001-01-01 00:00:00
+getunit[ATT.Roll]=;1
+getunit[IMU.GyrX]=;1
+getunit[GPS.Lat]=;1
+getunit[BARO.Alt]=;1
+instanceindex[IMU]=-1
+instanceindex[GPS]=-1
