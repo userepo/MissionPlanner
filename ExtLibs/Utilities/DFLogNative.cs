@@ -18,7 +18,7 @@ namespace MissionPlanner.Utilities
 
         /// <summary>the ABI this build expects; the checked-in and freshly
         /// built libraries must both report it (see rust/update-dll.bat)</summary>
-        internal const uint AbiVersion = 3;
+        internal const uint AbiVersion = 4;
 
         [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)]
         static extern uint dflog_abi_version();
@@ -49,6 +49,9 @@ namespace MissionPlanner.Utilities
 
         [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)]
         static extern void dflog_array_column_free(IntPtr column);
+
+        [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)]
+        static extern int dflog_time_base(IntPtr file, out long gpsStartUnixMs, out long msOffset);
 
         [StructLayout(LayoutKind.Sequential)]
         struct NativeIndex
@@ -227,6 +230,30 @@ namespace MissionPlanner.Utilities
                 {
                     if (handle != IntPtr.Zero)
                         dflog_array_column_free(handle);
+                }
+            }
+
+            /// <summary>
+            /// Wall-clock correlation from the log's first valid GPS fix.
+            /// Returns false when the library is unavailable or the log has
+            /// no usable fix.
+            /// </summary>
+            public bool TryGetTimeBase(out long gpsStartUnixMs, out long msOffset)
+            {
+                gpsStartUnixMs = 0;
+                msOffset = 0;
+
+                if (_file == IntPtr.Zero)
+                    return false;
+
+                try
+                {
+                    return dflog_time_base(_file, out gpsStartUnixMs, out msOffset) == 0;
+                }
+                catch (Exception ex)
+                {
+                    log.Warn("dflog_time_base failed", ex);
+                    return false;
                 }
             }
 

@@ -22,7 +22,9 @@ pub const DFLOG_ERR_IO: i32 = -2;
 pub const DFLOG_ERR_PANIC: i32 = -3;
 
 /// Bumped when the ABI changes shape; checked by the C# side.
-pub const DFLOG_ABI_VERSION: u32 = 3;
+pub const DFLOG_ABI_VERSION: u32 = 4;
+
+pub const DFLOG_ERR_NO_TIME_BASE: i32 = -5;
 
 pub const DFLOG_ERR_QUERY: i32 = -4;
 
@@ -299,6 +301,40 @@ pub unsafe extern "C" fn dflog_get_array_column(
         }
         Err(_) => {
             set_last_error("panic in dflog_get_array_column".into());
+            DFLOG_ERR_PANIC
+        }
+    }
+}
+
+/// Wall-clock correlation from the log's first valid GPS fix:
+/// `gps_start_unix_ms` (UTC) and the board `ms_offset` it corresponds to.
+/// Returns `DFLOG_ERR_NO_TIME_BASE` when the log has no usable fix.
+///
+/// # Safety
+/// `file` must be a live `dflog_open` handle; the out pointers must be valid.
+#[no_mangle]
+pub unsafe extern "C" fn dflog_time_base(
+    file: *const DflogFile,
+    gps_start_unix_ms: *mut i64,
+    ms_offset: *mut i64,
+) -> i32 {
+    if file.is_null() || gps_start_unix_ms.is_null() || ms_offset.is_null() {
+        set_last_error("null argument".into());
+        return DFLOG_ERR_BAD_ARGUMENT;
+    }
+
+    match catch_unwind(AssertUnwindSafe(|| (*file).log.time_base())) {
+        Ok(Some(base)) => {
+            *gps_start_unix_ms = base.gps_start_unix_ms;
+            *ms_offset = base.ms_offset;
+            DFLOG_OK
+        }
+        Ok(None) => {
+            set_last_error("no usable gps fix in log".into());
+            DFLOG_ERR_NO_TIME_BASE
+        }
+        Err(_) => {
+            set_last_error("panic in dflog_time_base".into());
             DFLOG_ERR_PANIC
         }
     }

@@ -100,6 +100,12 @@ fn exercise(data: &[u8]) {
                 }
             }
         }
+
+        // the general access layer and the time correlation
+        for record in log.records().take(64) {
+            let _ = record.values();
+        }
+        let _ = log.time_base();
     }
 }
 
