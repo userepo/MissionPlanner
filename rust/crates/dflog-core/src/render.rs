@@ -164,7 +164,11 @@ pub fn format_significant(value: f64, prec: usize) -> String {
         return "NaN".into();
     }
     if value.is_infinite() {
-        return if value > 0.0 { "Infinity".into() } else { "-Infinity".into() };
+        return if value > 0.0 {
+            "Infinity".into()
+        } else {
+            "-Infinity".into()
+        };
     }
     if value == 0.0 {
         return "0".into();
@@ -186,7 +190,11 @@ fn format_significant_f32(value: f32) -> String {
         return "NaN".into();
     }
     if value.is_infinite() {
-        return if value > 0.0 { "Infinity".into() } else { "-Infinity".into() };
+        return if value > 0.0 {
+            "Infinity".into()
+        } else {
+            "-Infinity".into()
+        };
     }
     if value == 0.0 {
         return "0".into();
@@ -256,14 +264,36 @@ fn render_field(code: u8, payload: &[u8], at: usize, out: &mut String) -> bool {
         b'I' => write!(out, "{}", u32::from_le_bytes([b[0], b[1], b[2], b[3]])).unwrap(),
         b'q' => write!(out, "{}", i64::from_le_bytes(b[..8].try_into().unwrap())).unwrap(),
         b'Q' => write!(out, "{}", u64::from_le_bytes(b[..8].try_into().unwrap())).unwrap(),
-        b'f' => out.push_str(&format_significant_f32(f32::from_le_bytes([b[0], b[1], b[2], b[3]]))),
-        b'd' => out.push_str(&format_significant(f64::from_le_bytes(b[..8].try_into().unwrap()), 15)),
-        b'g' => out.push_str(&format_significant_f32(crate::columns::half_to_f32(u16::from_le_bytes([b[0], b[1]])))),
-        b'c' => out.push_str(&format_significant(i16::from_le_bytes([b[0], b[1]]) as f64 / 100.0, 15)),
-        b'C' => out.push_str(&format_significant(u16::from_le_bytes([b[0], b[1]]) as f64 / 100.0, 15)),
-        b'e' => out.push_str(&format_significant(i32::from_le_bytes([b[0], b[1], b[2], b[3]]) as f64 / 100.0, 15)),
-        b'E' => out.push_str(&format_significant(u32::from_le_bytes([b[0], b[1], b[2], b[3]]) as f64 / 100.0, 15)),
-        b'L' => out.push_str(&format_significant(i32::from_le_bytes([b[0], b[1], b[2], b[3]]) as f64 / 10000000.0, 15)),
+        b'f' => out.push_str(&format_significant_f32(f32::from_le_bytes([
+            b[0], b[1], b[2], b[3],
+        ]))),
+        b'd' => out.push_str(&format_significant(
+            f64::from_le_bytes(b[..8].try_into().unwrap()),
+            15,
+        )),
+        b'g' => out.push_str(&format_significant_f32(crate::columns::half_to_f32(
+            u16::from_le_bytes([b[0], b[1]]),
+        ))),
+        b'c' => out.push_str(&format_significant(
+            i16::from_le_bytes([b[0], b[1]]) as f64 / 100.0,
+            15,
+        )),
+        b'C' => out.push_str(&format_significant(
+            u16::from_le_bytes([b[0], b[1]]) as f64 / 100.0,
+            15,
+        )),
+        b'e' => out.push_str(&format_significant(
+            i32::from_le_bytes([b[0], b[1], b[2], b[3]]) as f64 / 100.0,
+            15,
+        )),
+        b'E' => out.push_str(&format_significant(
+            u32::from_le_bytes([b[0], b[1], b[2], b[3]]) as f64 / 100.0,
+            15,
+        )),
+        b'L' => out.push_str(&format_significant(
+            i32::from_le_bytes([b[0], b[1], b[2], b[3]]) as f64 / 10000000.0,
+            15,
+        )),
         b'n' => out.push_str(&ascii_lossy_trim(&b[..4])),
         b'N' => out.push_str(&ascii_lossy_trim(&b[..16])),
         b'Z' => match escape_z(&b[..64]) {
@@ -272,11 +302,11 @@ fn render_field(code: u8, payload: &[u8], at: usize, out: &mut String) -> bool {
         },
         b'a' => {
             out.push('[');
-            for (i, pair) in b.chunks_exact(2).enumerate() {
+            for (i, pair) in b.as_chunks::<2>().0.iter().enumerate() {
                 if i > 0 {
                     out.push(' ');
                 }
-                write!(out, "{}", i16::from_le_bytes([pair[0], pair[1]])).unwrap();
+                write!(out, "{}", i16::from_le_bytes(*pair)).unwrap();
             }
             out.push(']');
         }
@@ -296,7 +326,10 @@ struct FmtEntry {
 /// One-pass conversion of a binary log to the ConvertBin text form.
 pub fn convert<W: Write>(data: &[u8], out: &mut W) -> io::Result<RenderStats> {
     let mut fmts: Vec<FmtEntry> = vec![FmtEntry::default(); 256];
-    let mut stats = RenderStats { records: 0, dropped: 0 };
+    let mut stats = RenderStats {
+        records: 0,
+        dropped: 0,
+    };
     let len = data.len();
     let mut pos = 0usize;
     let mut line = String::new();
@@ -399,7 +432,10 @@ mod tests {
         assert_eq!(format_significant(1.0, 15), "1");
         assert_eq!(format_significant(-12.34, 15), "-12.34");
         assert_eq!(format_significant(0.1, 15), "0.1");
-        assert_eq!(format_significant(1234567890123456.0, 15), "1.23456789012346E+15");
+        assert_eq!(
+            format_significant(1234567890123456.0, 15),
+            "1.23456789012346E+15"
+        );
         assert_eq!(format_significant(0.00001, 15), "1E-05");
         assert_eq!(format_significant(47.3566, 15), "47.3566");
         assert_eq!(format_significant(f64::NAN, 15), "NaN");
@@ -435,13 +471,21 @@ mod tests {
             let bits = next();
             let d = f64::from_bits(bits);
             if d.is_finite() && d != 0.0 {
-                assert_eq!(format_significant(d, 15), format_significant_exact(d, 15), "f64 {bits:#x}");
+                assert_eq!(
+                    format_significant(d, 15),
+                    format_significant_exact(d, 15),
+                    "f64 {bits:#x}"
+                );
             }
 
             let fbits = bits as u32;
             let f = f32::from_bits(fbits);
             if f.is_finite() && f != 0.0 {
-                assert_eq!(format_significant_f32(f), format_significant_exact(f as f64, 7), "f32 {fbits:#x}");
+                assert_eq!(
+                    format_significant_f32(f),
+                    format_significant_exact(f as f64, 7),
+                    "f32 {fbits:#x}"
+                );
             }
         }
 
@@ -449,12 +493,20 @@ mod tests {
         for i in (i32::MIN..i32::MAX).step_by(9_999_991) {
             let d = i as f64 / 100.0;
             if d != 0.0 {
-                assert_eq!(format_significant(d, 15), format_significant_exact(d, 15), "scaled {i}");
+                assert_eq!(
+                    format_significant(d, 15),
+                    format_significant_exact(d, 15),
+                    "scaled {i}"
+                );
             }
         }
 
         for mid in [94502.125f32, 0.15625, 1.5, 2.5e-7, 123456.75, -94502.125] {
-            assert_eq!(format_significant_f32(mid), format_significant_exact(mid as f64, 7), "midpoint {mid}");
+            assert_eq!(
+                format_significant_f32(mid),
+                format_significant_exact(mid as f64, 7),
+                "midpoint {mid}"
+            );
         }
     }
 

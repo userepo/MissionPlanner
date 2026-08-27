@@ -19,11 +19,20 @@ use crate::LogFile;
 #[derive(Debug)]
 pub enum ColumnError {
     UnknownType(String),
-    UnknownField { field: String, available: String },
+    UnknownField {
+        field: String,
+        available: String,
+    },
     /// field exists but has no numeric decoding (n/N/Z strings, `a` arrays)
-    NotNumeric { field: String, code: char },
+    NotNumeric {
+        field: String,
+        code: char,
+    },
     /// field is not an `a` (int16[32]) array
-    NotArray { field: String, code: char },
+    NotArray {
+        field: String,
+        code: char,
+    },
     /// FMT format/labels column counts disagree; no stable field mapping
     MalformedFormat(String),
 }
@@ -129,7 +138,11 @@ fn decode(code: char, data: &[u8], at: usize) -> f64 {
 }
 
 /// Decode `fields` of every `type_name` record in the log.
-pub fn get_columns(log: &LogFile, type_name: &str, fields: &[&str]) -> Result<Columns, ColumnError> {
+pub fn get_columns(
+    log: &LogFile,
+    type_name: &str,
+    fields: &[&str],
+) -> Result<Columns, ColumnError> {
     let &id = log
         .name_to_id
         .get(type_name)
@@ -148,19 +161,23 @@ pub fn get_columns(log: &LogFile, type_name: &str, fields: &[&str]) -> Result<Co
     // C# FindMessageOffset lookup
     let mut offsets = Vec::with_capacity(fields.len());
     for &field in fields {
-        let pos = fmt
-            .labels
-            .iter()
-            .position(|l| l == field)
-            .ok_or_else(|| ColumnError::UnknownField {
+        let pos = fmt.labels.iter().position(|l| l == field).ok_or_else(|| {
+            ColumnError::UnknownField {
                 field: field.into(),
                 available: fmt.labels.join(","),
-            })?;
+            }
+        })?;
         let code = codes[pos];
         if field_size(code).is_none() || matches!(code, 'n' | 'N' | 'Z' | 'a') {
-            return Err(ColumnError::NotNumeric { field: field.into(), code });
+            return Err(ColumnError::NotNumeric {
+                field: field.into(),
+                code,
+            });
         }
-        let offset: usize = codes[..pos].iter().map(|&c| field_size(c).unwrap_or(0)).sum();
+        let offset: usize = codes[..pos]
+            .iter()
+            .map(|&c| field_size(c).unwrap_or(0))
+            .sum();
         offsets.push((offset, code));
     }
 
@@ -222,19 +239,25 @@ pub fn get_array_column(
         return Err(ColumnError::MalformedFormat(type_name.into()));
     }
 
-    let pos = fmt
-        .labels
-        .iter()
-        .position(|l| l == field)
-        .ok_or_else(|| ColumnError::UnknownField {
-            field: field.into(),
-            available: fmt.labels.join(","),
-        })?;
+    let pos =
+        fmt.labels
+            .iter()
+            .position(|l| l == field)
+            .ok_or_else(|| ColumnError::UnknownField {
+                field: field.into(),
+                available: fmt.labels.join(","),
+            })?;
     if codes[pos] != 'a' {
-        return Err(ColumnError::NotArray { field: field.into(), code: codes[pos] });
+        return Err(ColumnError::NotArray {
+            field: field.into(),
+            code: codes[pos],
+        });
     }
 
-    let field_offset: usize = codes[..pos].iter().map(|&c| field_size(c).unwrap_or(0)).sum();
+    let field_offset: usize = codes[..pos]
+        .iter()
+        .map(|&c| field_size(c).unwrap_or(0))
+        .sum();
 
     let data = log.data();
     let mut linenos = Vec::new();
@@ -316,8 +339,10 @@ mod tests {
         assert_eq!(&col.values[32..37], &[100, 101, 102, 103, 104]);
         assert!(col.values[37..].iter().all(|&v| v == 0));
 
-        assert!(matches!(get_array_column(&log, "ISB", "N"),
-            Err(ColumnError::NotArray { .. })));
+        assert!(matches!(
+            get_array_column(&log, "ISB", "N"),
+            Err(ColumnError::NotArray { .. })
+        ));
 
         drop(log);
         let _ = std::fs::remove_dir_all(&dir);

@@ -111,8 +111,8 @@ fn exercise(data: &[u8]) {
 }
 
 fn seeds() -> Vec<Vec<u8>> {
-    let corpus = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("../../testdata/copter.bin");
+    let corpus =
+        std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../testdata/copter.bin");
     let copter = std::fs::read(&corpus).expect("corpus copter.bin");
 
     vec![
@@ -136,7 +136,10 @@ fn mutated_inputs_never_panic() {
         if result.is_err() {
             let path = std::env::temp_dir().join(format!("dflog-fuzz-fail-{iteration}.bin"));
             let _ = std::fs::write(&path, &data);
-            panic!("iteration {iteration} panicked; input saved to {}", path.display());
+            panic!(
+                "iteration {iteration} panicked; input saved to {}",
+                path.display()
+            );
         }
     }
 }

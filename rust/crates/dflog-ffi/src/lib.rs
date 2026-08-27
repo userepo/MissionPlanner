@@ -29,7 +29,7 @@ pub const DFLOG_ERR_NO_TIME_BASE: i32 = -5;
 pub const DFLOG_ERR_QUERY: i32 = -4;
 
 thread_local! {
-    static LAST_ERROR: RefCell<String> = RefCell::new(String::new());
+    static LAST_ERROR: RefCell<String> = const { RefCell::new(String::new()) };
 }
 
 fn set_last_error(message: String) {
@@ -58,7 +58,10 @@ pub extern "C" fn dflog_abi_version() -> u32 {
 /// `path_utf8` must be a valid NUL-terminated UTF-8 string and `out` a valid
 /// pointer to receive the index.
 #[no_mangle]
-pub unsafe extern "C" fn dflog_scan_file(path_utf8: *const c_char, out: *mut *mut DflogIndex) -> i32 {
+pub unsafe extern "C" fn dflog_scan_file(
+    path_utf8: *const c_char,
+    out: *mut *mut DflogIndex,
+) -> i32 {
     if path_utf8.is_null() || out.is_null() {
         set_last_error("null argument".into());
         return DFLOG_ERR_BAD_ARGUMENT;
@@ -197,7 +200,10 @@ pub unsafe extern "C" fn dflog_get_columns(
     }
     *out = ptr::null_mut();
 
-    let (type_name, fields_csv) = match (CStr::from_ptr(type_utf8).to_str(), CStr::from_ptr(fields_utf8).to_str()) {
+    let (type_name, fields_csv) = match (
+        CStr::from_ptr(type_utf8).to_str(),
+        CStr::from_ptr(fields_utf8).to_str(),
+    ) {
         (Ok(t), Ok(f)) => (t, f),
         _ => {
             set_last_error("type/fields are not valid UTF-8".into());
@@ -268,7 +274,10 @@ pub unsafe extern "C" fn dflog_get_array_column(
     }
     *out = ptr::null_mut();
 
-    let (type_name, field) = match (CStr::from_ptr(type_utf8).to_str(), CStr::from_ptr(field_utf8).to_str()) {
+    let (type_name, field) = match (
+        CStr::from_ptr(type_utf8).to_str(),
+        CStr::from_ptr(field_utf8).to_str(),
+    ) {
         (Ok(t), Ok(f)) => (t, f),
         _ => {
             set_last_error("type/field are not valid UTF-8".into());

@@ -186,7 +186,11 @@ mod tests {
             assert!(!table.multipliers.is_empty(), "{name}: no MULT records");
 
             // the autopilot's own convention rows
-            assert_eq!(table.unit_names.get(&'d').map(String::as_str), Some("deg"), "{name}");
+            assert_eq!(
+                table.unit_names.get(&'d').map(String::as_str),
+                Some("deg"),
+                "{name}"
+            );
             assert_eq!(table.multipliers.get(&'0').copied(), Some(1.0), "{name}");
         }
     }
@@ -200,7 +204,15 @@ mod tests {
 
         let table = log.units();
         let meta = table.field_meta(0xFE, 99);
-        assert_eq!(meta, FieldMeta { unit_id: None, unit: None, mult_id: None, multiplier: None });
+        assert_eq!(
+            meta,
+            FieldMeta {
+                unit_id: None,
+                unit: None,
+                mult_id: None,
+                multiplier: None
+            }
+        );
 
         let empty = LogFile::open_bytes(&[]).unwrap();
         assert!(empty.units().is_empty());

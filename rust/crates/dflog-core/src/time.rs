@@ -76,7 +76,10 @@ impl LogFile {
     /// usable fix.
     pub fn time_base(&self) -> Option<TimeBase> {
         // quirk: offsets resolved via the GPS format regardless of record type
-        let gps_fmt = self.name_to_id.get("GPS").and_then(|id| self.fmts.get(id))?;
+        let gps_fmt = self
+            .name_to_id
+            .get("GPS")
+            .and_then(|id| self.fmts.get(id))?;
 
         let label_pos = |name: &str| gps_fmt.labels.iter().position(|l| l == name);
 
@@ -106,8 +109,12 @@ impl LogFile {
                 }
             }
 
-            let Some(week) = field(&record, week_pos) else { continue };
-            let Some(gms) = field(&record, ms_pos) else { continue };
+            let Some(week) = field(&record, week_pos) else {
+                continue;
+            };
+            let Some(gms) = field(&record, ms_pos) else {
+                continue;
+            };
 
             let week = week as i64;
             let sec = gms / 1000.0;
@@ -162,13 +169,17 @@ mod tests {
     }
 
     #[test]
-    fn corpus_logs_have_a_time_base()
-    {
+    fn corpus_logs_have_a_time_base() {
         for name in ["copter.bin", "plane.bin", "rover.bin", "copter-isbd.bin"] {
             let log = corpus(name);
-            let base = log.time_base().unwrap_or_else(|| panic!("{name}: no time base"));
+            let base = log
+                .time_base()
+                .unwrap_or_else(|| panic!("{name}: no time base"));
             // sanity: SITL simulates recent dates; well after 2020-01-01 UTC
-            assert!(base.gps_start_unix_ms > 1_577_836_800_000, "{name}: {base:?}");
+            assert!(
+                base.gps_start_unix_ms > 1_577_836_800_000,
+                "{name}: {base:?}"
+            );
             assert!(base.ms_offset > 0, "{name}: {base:?}");
             // monotonic mapping
             let t0 = base.wall_clock_unix_ms(base.ms_offset as f64);

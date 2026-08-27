@@ -94,8 +94,10 @@ fn decode_value(code: u8, payload: &[u8], at: usize) -> Option<Value> {
         b'N' => Value::Str(ascii_lossy_trim(&b[..16])),
         b'Z' => Value::Str(ascii_lossy_trim(&b[..64])),
         b'a' => Value::Shorts(
-            b.chunks_exact(2)
-                .map(|p| i16::from_le_bytes([p[0], p[1]]))
+            b.as_chunks::<2>()
+                .0
+                .iter()
+                .map(|p| i16::from_le_bytes(*p))
                 .collect(),
         ),
         _ => return None,
@@ -133,9 +135,10 @@ impl<'a> Record<'a> {
         let mut out = Vec::with_capacity(codes.len());
         let mut at = 0usize;
         for (pos, &code) in codes.iter().enumerate() {
-            if let (Some(label), Some(value)) =
-                (self.fmt.labels.get(pos), decode_value(code, self.payload, at))
-            {
+            if let (Some(label), Some(value)) = (
+                self.fmt.labels.get(pos),
+                decode_value(code, self.payload, at),
+            ) {
                 out.push((label.as_str(), value));
             }
             at += field_size(code);
@@ -241,9 +244,18 @@ mod tests {
         for record in log.records_of(&["ATT"]) {
             assert_eq!(record.lineno, cols.linenos[row]);
             let rows = cols.rows as usize;
-            assert_eq!(record.value("TimeUS").unwrap().as_f64().unwrap(), cols.values[row]);
-            assert_eq!(record.value("Roll").unwrap().as_f64().unwrap(), cols.values[rows + row]);
-            assert_eq!(record.value("Pitch").unwrap().as_f64().unwrap(), cols.values[2 * rows + row]);
+            assert_eq!(
+                record.value("TimeUS").unwrap().as_f64().unwrap(),
+                cols.values[row]
+            );
+            assert_eq!(
+                record.value("Roll").unwrap().as_f64().unwrap(),
+                cols.values[rows + row]
+            );
+            assert_eq!(
+                record.value("Pitch").unwrap().as_f64().unwrap(),
+                cols.values[2 * rows + row]
+            );
             row += 1;
         }
 
@@ -256,11 +268,19 @@ mod tests {
         let first_msg = log.records_of(&["MSG"]).next().expect("MSG record");
         let text = first_msg.value("Message").unwrap();
         let text = text.as_str().unwrap();
-        assert!(text.starts_with("ArduCopter"), "unexpected MSG text: {text}");
+        assert!(
+            text.starts_with("ArduCopter"),
+            "unexpected MSG text: {text}"
+        );
 
         // PARM names are 'N' strings
         let first_parm = log.records_of(&["PARM"]).next().expect("PARM record");
-        assert!(!first_parm.value("Name").unwrap().as_str().unwrap().is_empty());
+        assert!(!first_parm
+            .value("Name")
+            .unwrap()
+            .as_str()
+            .unwrap()
+            .is_empty());
     }
 
     #[test]

@@ -25,9 +25,7 @@ fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let result = match args.as_slice() {
         [cmd, log] if cmd == "info" => info(Path::new(log)),
-        [cmd, log, type_name, fields] if cmd == "dump" => {
-            dump(Path::new(log), type_name, fields)
-        }
+        [cmd, log, type_name, fields] if cmd == "dump" => dump(Path::new(log), type_name, fields),
         [cmd, log, out] if cmd == "convert" => convert(Path::new(log), Path::new(out)),
         [cmd, rest @ ..] if cmd == "parquet" => parquet(rest),
         _ => {
@@ -79,7 +77,10 @@ fn info(path: &Path) -> Result<(), String> {
     println!("file: {}", path.display());
     println!("records: {}", log.index.len());
     println!();
-    println!("{:<6} {:<8} {:<6} {:<18} {}", "id", "count", "len", "format", "name");
+    println!(
+        "{:<6} {:<8} {:<6} {:<18} name",
+        "id", "count", "len", "format"
+    );
 
     let mut ids: Vec<u8> = log.fmts.keys().copied().collect();
     ids.sort_unstable();
@@ -121,7 +122,10 @@ fn dump(path: &Path, type_name: &str, fields_csv: &str) -> Result<(), String> {
         let mut line = cols.linenos[row].to_string();
         for col in 0..fields.len() {
             line.push(',');
-            line.push_str(&render::format_significant(cols.values[col * rows + row], 15));
+            line.push_str(&render::format_significant(
+                cols.values[col * rows + row],
+                15,
+            ));
         }
         writeln!(out, "{line}").map_err(|e| e.to_string())?;
     }
