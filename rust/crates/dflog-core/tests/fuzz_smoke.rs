@@ -101,11 +101,12 @@ fn exercise(data: &[u8]) {
             }
         }
 
-        // the general access layer and the time correlation
+        // the general access layer, the time correlation and units metadata
         for record in log.records().take(64) {
             let _ = record.values();
         }
         let _ = log.time_base();
+        let _ = log.units();
     }
 }
 

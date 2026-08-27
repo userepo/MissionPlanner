@@ -31,6 +31,7 @@ pub mod access;
 pub mod columns;
 pub mod render;
 pub mod time;
+pub mod units;
 
 pub const HEAD_BYTE1: u8 = 0xA3;
 pub const HEAD_BYTE2: u8 = 0x95;
