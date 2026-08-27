@@ -7,6 +7,9 @@
 //!                                            with Mission Planner's
 //!                                            BinaryLog.ConvertBin (headless:
 //!                                            M fields as mode numbers)
+//!   dflog parquet <log.bin> <out-dir> [TYPES]  one parquet file per message
+//!                                            type (builds with
+//!                                            --features parquet)
 
 use std::fs::File;
 use std::io::{BufWriter, Write};
@@ -14,6 +17,9 @@ use std::path::Path;
 use std::process::ExitCode;
 
 use dflog_core::{columns, render, LogFile};
+
+#[cfg(feature = "parquet")]
+mod parquet_export;
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -23,10 +29,12 @@ fn main() -> ExitCode {
             dump(Path::new(log), type_name, fields)
         }
         [cmd, log, out] if cmd == "convert" => convert(Path::new(log), Path::new(out)),
+        [cmd, rest @ ..] if cmd == "parquet" => parquet(rest),
         _ => {
             eprintln!("usage: dflog info <log.bin>");
             eprintln!("       dflog dump <log.bin> <TYPE> <FIELD1,FIELD2,...>");
             eprintln!("       dflog convert <log.bin> <out.log>");
+            eprintln!("       dflog parquet <log.bin> <out-dir> [TYPE1,TYPE2,...]");
             return ExitCode::from(2);
         }
     };
@@ -42,6 +50,22 @@ fn main() -> ExitCode {
 
 fn open(path: &Path) -> Result<LogFile, String> {
     LogFile::open(path).map_err(|e| format!("{}: {e}", path.display()))
+}
+
+#[cfg(feature = "parquet")]
+fn parquet(args: &[String]) -> Result<(), String> {
+    match args {
+        [log, out_dir] => parquet_export::export(Path::new(log), Path::new(out_dir), None),
+        [log, out_dir, types] => {
+            parquet_export::export(Path::new(log), Path::new(out_dir), Some(types))
+        }
+        _ => Err("usage: dflog parquet <log.bin> <out-dir> [TYPE1,TYPE2,...]".into()),
+    }
+}
+
+#[cfg(not(feature = "parquet"))]
+fn parquet(_args: &[String]) -> Result<(), String> {
+    Err("this build has no parquet support (rebuild with --features parquet)".into())
 }
 
 fn info(path: &Path) -> Result<(), String> {

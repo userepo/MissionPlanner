@@ -17,7 +17,9 @@ Current members:
 - `crates/dflog-cli` - the standalone `dflog` binary: `info` (record/type
   summary), `dump` (numeric columns as CSV), `convert` (text conversion,
   byte-compatible with Mission Planner's BinaryLog.ConvertBin run headless;
-  verified against the corpus by tests/MissionPlanner.Utilities.Tests).
+  verified against the corpus by tests/MissionPlanner.Utilities.Tests), and
+  `parquet` (one file per message type with lineno + UTC timestamp columns;
+  opt-in via `--features parquet`, which pulls the arrow dependency tree).
 
 Build:
 

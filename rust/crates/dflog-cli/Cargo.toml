@@ -1,9 +1,9 @@
 [package]
 name = "dflog-cli"
-version = "0.4.0"
+version = "0.5.0"
 edition.workspace = true
 license.workspace = true
-description = "ArduPilot dataflash (.bin) log tool: info, dump, convert"
+description = "ArduPilot dataflash (.bin) log tool: info, dump, convert, parquet export"
 
 [[bin]]
 name = "dflog"
@@ -12,3 +12,11 @@ path = "src/main.rs"
 [dependencies]
 dflog-core = { path = "../dflog-core" }
 memmap2 = "0.9.11"
+# parquet export is opt-in: `cargo build --features parquet` (arrow pulls
+# a large dependency tree; the default CLI build stays small)
+arrow-array = { version = "59.2.0", optional = true }
+arrow-schema = { version = "59.2.0", optional = true }
+parquet = { version = "59.2.0", optional = true }
+
+[features]
+parquet = ["dep:arrow-array", "dep:arrow-schema", "dep:parquet"]
