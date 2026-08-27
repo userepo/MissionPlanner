@@ -43,7 +43,10 @@ static class Program
         form.logfilename = Path.GetFullPath(logfile);
         form.Size = new Size(1400, 900);
         form.StartPosition = FormStartPosition.Manual;
-        form.Location = new Point(20, 20);
+        // off-screen: the form must never sit under the real mouse cursor -
+        // LogBrowse's MouseMove crosshair would draw into the capture and
+        // make the pixel comparison depend on where the mouse happens to be
+        form.Location = new Point(-2000, 20);
 
         var t = typeof(LogBrowse);
         var logdataField = t.GetField("logdata", BindingFlags.NonPublic | BindingFlags.Instance);
@@ -63,9 +66,28 @@ static class Program
             return 1;
         }
 
+        // configure checkboxes BEFORE the form shows: (a) the persist handlers
+        // that write LB_* into the user's real settings are only subscribed
+        // during Load, so pre-Show changes do not touch the settings store,
+        // and (b) the mode/error/msg overlays rebuild asynchronously and make
+        // pixel comparisons racy - the harness verifies curves, so turn the
+        // overlays and the map off entirely
+        void SetChk(string name, bool value)
+        {
+            var field = t.GetField(name, BindingFlags.NonPublic | BindingFlags.Instance);
+            if (field?.GetValue(form) is CheckBox box)
+                box.Checked = value;
+        }
+
+        SetChk("chk_time", Environment.GetEnvironmentVariable("LOGBROWSE_TIMEAXIS") == "1");
+        foreach (var overlay in new[] { "chk_mode", "chk_errors", "chk_msg", "chk_events", "CHK_map" })
+            SetChk(overlay, false);
+
         int state = 0;
         var started = DateTime.UtcNow;
         int exit = 2;
+        var lastObjCount = -1;
+        var lastObjChange = DateTime.UtcNow;
 
         var timer = new Timer { Interval = 250 };
         timer.Tick += (s, e) =>
@@ -87,10 +109,6 @@ static class Program
                     case 0: // wait for the log to load
                         if (logdataField.GetValue(form) == null)
                             return;
-                        // settle one tick, then force the requested x axis
-                        var chk = (CheckBox)chkTimeField?.GetValue(form);
-                        if (chk != null)
-                            chk.Checked = Environment.GetEnvironmentVariable("LOGBROWSE_TIMEAXIS") == "1";
                         state = 1;
                         return;
 
@@ -111,14 +129,22 @@ static class Program
                         started = DateTime.UtcNow;
                         return;
 
-                    case 3: // one settle second, then capture
-                        if ((DateTime.UtcNow - started).TotalSeconds < 1)
+                    case 3: // capture once the async overlays (modes/msgs/errors)
+                            // have stopped mutating the graph for 2 seconds
+                        var objCount = zg1.GraphPane.GraphObjList.Count;
+                        if (objCount != lastObjCount)
+                        {
+                            lastObjCount = objCount;
+                            lastObjChange = DateTime.UtcNow;
+                            return;
+                        }
+
+                        if ((DateTime.UtcNow - lastObjChange).TotalSeconds < 2)
                             return;
 
-                        zg1.AxisChange();
-                        zg1.Invalidate();
-                        zg1.Refresh();
-
+                        // no AxisChange/Refresh here: they fire zoom events that
+                        // rebuild the overlays asynchronously mid-capture;
+                        // DrawToBitmap forces its own paint
                         using (var bmp = new SysBitmap(zg1.Width, zg1.Height))
                         {
                             zg1.DrawToBitmap(bmp, new Rectangle(0, 0, zg1.Width, zg1.Height));
@@ -219,10 +245,20 @@ static class Program
                 return 1;
             }
 
+            int minx = int.MaxValue, miny = int.MaxValue, maxx = -1, maxy = -1;
             for (var y = 0; y < ia.Height; y++)
             for (var x = 0; x < ia.Width; x++)
                 if (ia.GetPixel(x, y) != ib.GetPixel(x, y))
+                {
                     diffpixels++;
+                    minx = Math.Min(minx, x);
+                    miny = Math.Min(miny, y);
+                    maxx = Math.Max(maxx, x);
+                    maxy = Math.Max(maxy, y);
+                }
+
+            if (diffpixels > 0)
+                Console.WriteLine($"diff bbox: ({minx},{miny})-({maxx},{maxy}) of {ia.Width}x{ia.Height}");
 
             Console.WriteLine(FormattableString.Invariant(
                 $"COMPARE rows={la.Length} maxYdelta={maxdelta:E3} diffpixels={diffpixels} of {ia.Width * ia.Height}"));

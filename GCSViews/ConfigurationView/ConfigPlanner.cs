@@ -183,6 +183,8 @@ namespace MissionPlanner.GCSViews.ConfigurationView
 
             SetCheckboxFromConfig("analyticsoptout", chk_analytics);
 
+            SetCheckboxFromConfig("dflog_native", chk_dflognative);
+
             SetCheckboxFromConfig("CHK_GDIPlus", CHK_GDIPlus);
             SetCheckboxFromConfig("CHK_maprotation", CHK_maprotation);
 
@@ -848,6 +850,12 @@ namespace MissionPlanner.GCSViews.ConfigurationView
         {
             Tracking.OptOut = chk_analytics.Checked;
             Settings.Instance["analyticsoptout"] = chk_analytics.Checked.ToString();
+        }
+
+        private void chk_dflognative_CheckedChanged(object sender, EventArgs e)
+        {
+            Settings.Instance["dflog_native"] = chk_dflognative.Checked.ToString();
+            DFLogBuffer.UseNativeScan = chk_dflognative.Checked;
         }
 
         private void CHK_beta_CheckedChanged(object sender, EventArgs e)

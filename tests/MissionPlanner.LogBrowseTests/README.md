@@ -19,11 +19,15 @@ Build (also builds the whole app), then from `bin/Debug/net472`:
 set DFLOG_NATIVE=1
 MissionPlanner.LogBrowseTests.exe graph ..\..\..\..\MissionPlanner.Utilities.Tests\testdata\copter.bin native
 
-set DFLOG_NATIVE=
+set DFLOG_NATIVE=0
 MissionPlanner.LogBrowseTests.exe graph ..\..\..\..\MissionPlanner.Utilities.Tests\testdata\copter.bin managed
 
 MissionPlanner.LogBrowseTests.exe compare native managed
 ```
+
+Pin the env var explicitly for BOTH runs: with it unset, the flag falls
+back to the user's `dflog_native` setting, so an unpinned "managed" run
+would silently go native on a machine where the config checkbox is on.
 
 `compare` sorts plotted points by curve label + x (curve add-order differs
 between modes: the native path adds curves synchronously in request order,
@@ -45,6 +49,17 @@ COMPARE rows=686 maxYdelta=4.997E-009 diffpixels=0 of 1022528
 - max y delta ~5e-9: the documented divergence - the legacy path rounds
   floats through 7-significant-digit strings, the native path does not
 - rendered graphs pixel-identical
+
+## Determinism
+
+The harness positions the form off-screen (the LogBrowse mouse crosshair
+would otherwise draw wherever the real cursor happens to be) and unchecks
+the mode/error/msg/events overlays and the map before the form shows: the
+overlays rebuild asynchronously and make pixel comparisons racy, and the
+harness verifies curves, not decorations. Pre-Show checkbox changes also
+bypass the LB_* settings persistence (those handlers are only subscribed
+during Load), so runs never touch the user's real settings. Back-to-back
+identical runs are pixel-identical (0 differing pixels).
 
 ## Gotchas
 

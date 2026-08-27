@@ -39,13 +39,44 @@ namespace MissionPlanner.Utilities
 
         bool binary = false;
 
+        static bool? usenativescan;
+
         /// <summary>
-        /// Use the Rust index scanner (rust/crates/dflog-ffi) for binary logs
-        /// when the native library is present; the managed scanner remains the
-        /// fallback. See docs/dflog-rust-core-plan.md phase A.
+        /// Use the Rust log core (rust/crates/dflog-ffi) for binary logs when
+        /// the native library is present; the managed path remains the
+        /// fallback. Precedence: explicit set (tests, config UI) > the
+        /// DFLOG_NATIVE environment variable ("1"/"0") > the "dflog_native"
+        /// setting > off. See docs/dflog-rust-core-plan.md.
         /// </summary>
-        public static bool UseNativeScan =
-            Environment.GetEnvironmentVariable("DFLOG_NATIVE") == "1";
+        public static bool UseNativeScan
+        {
+            get
+            {
+                if (usenativescan == null)
+                    usenativescan = DefaultUseNativeScan();
+                return usenativescan.Value;
+            }
+            set { usenativescan = value; }
+        }
+
+        static bool DefaultUseNativeScan()
+        {
+            var env = Environment.GetEnvironmentVariable("DFLOG_NATIVE");
+            if (env == "1")
+                return true;
+            if (env == "0")
+                return false;
+
+            try
+            {
+                return Settings.Instance.GetBoolean("dflog_native", false);
+            }
+            catch
+            {
+                // no settings store (headless/embedded use)
+                return false;
+            }
+        }
 
         /// <summary>Whether the last setlinecount used the native scanner.</summary>
         internal static bool LastScanNative;
