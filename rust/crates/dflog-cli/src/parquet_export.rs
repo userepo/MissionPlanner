@@ -144,11 +144,8 @@ impl TypeWriter {
             kept.push(position);
         }
 
-        let time_utc = if has_time_base && time_us_position.is_some() {
-            Some(TimestampMicrosecondBuilder::new().with_timezone("UTC"))
-        } else {
-            None
-        };
+        let time_utc = (has_time_base && time_us_position.is_some())
+            .then(|| TimestampMicrosecondBuilder::new().with_timezone("UTC"));
 
         let mut schema_fields = vec![Field::new("lineno", DataType::UInt64, false)];
         if time_utc.is_some() {
@@ -165,7 +162,8 @@ impl TypeWriter {
 
         let out_path = out_dir.join(format!("{name}.parquet"));
         let file = File::create(&out_path).map_err(|e| format!("{}: {e}", out_path.display()))?;
-        let writer = ArrowWriter::try_new(file, schema.clone(), None).map_err(|e| e.to_string())?;
+        let writer =
+            ArrowWriter::try_new(file, Arc::clone(&schema), None).map_err(|e| e.to_string())?;
 
         Ok(TypeWriter {
             writer,
@@ -234,7 +232,8 @@ impl TypeWriter {
         for (_, builder) in &mut self.fields {
             arrays.push(builder.finish());
         }
-        let batch = RecordBatch::try_new(self.schema.clone(), arrays).map_err(|e| e.to_string())?;
+        let batch =
+            RecordBatch::try_new(Arc::clone(&self.schema), arrays).map_err(|e| e.to_string())?;
         self.writer.write(&batch).map_err(|e| e.to_string())?;
         self.rows_in_batch = 0;
         Ok(())

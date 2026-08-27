@@ -23,6 +23,7 @@ use std::io::{self, Write};
 
 use crate::{FMT_PAYLOAD_LEN, FMT_TYPE, HEAD_BYTE1, HEAD_BYTE2};
 
+#[derive(Debug)]
 pub struct RenderStats {
     pub records: u64,
     pub dropped: u64,
@@ -45,6 +46,10 @@ fn field_size(code: u8) -> usize {
 /// lay out a trimmed significant-digit string under the .NET "G" rules:
 /// fixed notation unless the decimal exponent is < -4 or >= the precision,
 /// then d.dddE+XX with at least two exponent digits
+#[expect(
+    clippy::string_slice,
+    reason = "`digits` is ASCII 0-9 by construction (extracted from `format!(\"{:.e}\")` output), so byte indexes are always char boundaries"
+)]
 fn layout_digits(negative: bool, digits: &str, exponent: i32, prec: usize) -> String {
     let mut out = String::new();
     if negative {

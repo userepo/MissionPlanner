@@ -37,6 +37,7 @@ fn set_last_error(message: String) {
 }
 
 #[repr(C)]
+#[derive(Debug)]
 pub struct DflogIndex {
     pub count: u64,
     pub offsets: *const u64,
@@ -66,9 +67,12 @@ pub unsafe extern "C" fn dflog_scan_file(
         set_last_error("null argument".into());
         return DFLOG_ERR_BAD_ARGUMENT;
     }
-    *out = ptr::null_mut();
+    // SAFETY: `out` is non-null and valid per the caller contract
+    unsafe { *out = ptr::null_mut() };
 
-    let path = match CStr::from_ptr(path_utf8).to_str() {
+    // SAFETY: `path_utf8` is a non-null NUL-terminated string per the
+    // caller contract
+    let path = match unsafe { CStr::from_ptr(path_utf8) }.to_str() {
         Ok(s) => PathBuf::from(s),
         Err(_) => {
             set_last_error("path is not valid UTF-8".into());
@@ -89,7 +93,8 @@ pub unsafe extern "C" fn dflog_scan_file(
             });
             boxed.offsets = boxed.offsets_vec.as_ptr();
             boxed.types = boxed.types_vec.as_ptr();
-            *out = Box::into_raw(boxed);
+            // SAFETY: `out` is non-null and valid per the caller contract
+            unsafe { *out = Box::into_raw(boxed) };
             DFLOG_OK
         }
         Ok(Err(err)) => {
@@ -111,17 +116,21 @@ pub unsafe extern "C" fn dflog_scan_file(
 #[no_mangle]
 pub unsafe extern "C" fn dflog_index_free(index: *mut DflogIndex) {
     if !index.is_null() {
-        drop(Box::from_raw(index));
+        // SAFETY: `index` came from Box::into_raw in dflog_scan_file and is
+        // not used again per the caller contract
+        drop(unsafe { Box::from_raw(index) });
     }
 }
 
 /// An open log kept resident for typed column queries (phase B).
+#[derive(Debug)]
 pub struct DflogFile {
     log: dflog_core::LogFile,
 }
 
 /// Column-major query result: `values[col * rows + row]`.
 #[repr(C)]
+#[derive(Debug)]
 pub struct DflogColumns {
     pub rows: u64,
     pub cols: u32,
@@ -143,9 +152,12 @@ pub unsafe extern "C" fn dflog_open(path_utf8: *const c_char, out: *mut *mut Dfl
         set_last_error("null argument".into());
         return DFLOG_ERR_BAD_ARGUMENT;
     }
-    *out = ptr::null_mut();
+    // SAFETY: `out` is non-null and valid per the caller contract
+    unsafe { *out = ptr::null_mut() };
 
-    let path = match CStr::from_ptr(path_utf8).to_str() {
+    // SAFETY: `path_utf8` is a non-null NUL-terminated string per the
+    // caller contract
+    let path = match unsafe { CStr::from_ptr(path_utf8) }.to_str() {
         Ok(s) => PathBuf::from(s),
         Err(_) => {
             set_last_error("path is not valid UTF-8".into());
@@ -155,7 +167,8 @@ pub unsafe extern "C" fn dflog_open(path_utf8: *const c_char, out: *mut *mut Dfl
 
     match catch_unwind(AssertUnwindSafe(|| dflog_core::LogFile::open(&path))) {
         Ok(Ok(log)) => {
-            *out = Box::into_raw(Box::new(DflogFile { log }));
+            // SAFETY: `out` is non-null and valid per the caller contract
+            unsafe { *out = Box::into_raw(Box::new(DflogFile { log })) };
             DFLOG_OK
         }
         Ok(Err(err)) => {
@@ -177,7 +190,9 @@ pub unsafe extern "C" fn dflog_open(path_utf8: *const c_char, out: *mut *mut Dfl
 #[no_mangle]
 pub unsafe extern "C" fn dflog_close(file: *mut DflogFile) {
     if !file.is_null() {
-        drop(Box::from_raw(file));
+        // SAFETY: `file` came from Box::into_raw in dflog_open and is not
+        // used again per the caller contract
+        drop(unsafe { Box::from_raw(file) });
     }
 }
 
@@ -198,12 +213,17 @@ pub unsafe extern "C" fn dflog_get_columns(
         set_last_error("null argument".into());
         return DFLOG_ERR_BAD_ARGUMENT;
     }
-    *out = ptr::null_mut();
+    // SAFETY: `out` is non-null and valid per the caller contract
+    unsafe { *out = ptr::null_mut() };
 
-    let (type_name, fields_csv) = match (
-        CStr::from_ptr(type_utf8).to_str(),
-        CStr::from_ptr(fields_utf8).to_str(),
-    ) {
+    // SAFETY: both strings are non-null and NUL-terminated per the caller
+    // contract
+    let (type_name, fields_csv) = match unsafe {
+        (
+            CStr::from_ptr(type_utf8).to_str(),
+            CStr::from_ptr(fields_utf8).to_str(),
+        )
+    } {
         (Ok(t), Ok(f)) => (t, f),
         _ => {
             set_last_error("type/fields are not valid UTF-8".into());
@@ -212,7 +232,8 @@ pub unsafe extern "C" fn dflog_get_columns(
     };
 
     let fields: Vec<&str> = fields_csv.split(',').collect();
-    let log = &(*file).log;
+    // SAFETY: `file` is a live dflog_open handle per the caller contract
+    let log = unsafe { &(*file).log };
 
     match catch_unwind(AssertUnwindSafe(|| {
         dflog_core::columns::get_columns(log, type_name, &fields)
@@ -228,7 +249,8 @@ pub unsafe extern "C" fn dflog_get_columns(
             });
             boxed.linenos = boxed.linenos_vec.as_ptr();
             boxed.values = boxed.values_vec.as_ptr();
-            *out = Box::into_raw(boxed);
+            // SAFETY: `out` is non-null and valid per the caller contract
+            unsafe { *out = Box::into_raw(boxed) };
             DFLOG_OK
         }
         Ok(Err(err)) => {
@@ -245,6 +267,7 @@ pub unsafe extern "C" fn dflog_get_columns(
 /// Row-major array-column result: `values[row * elems + e]`, elems = 32 for
 /// the `a` (int16[32]) format.
 #[repr(C)]
+#[derive(Debug)]
 pub struct DflogArrayColumn {
     pub rows: u64,
     pub elems: u32,
@@ -272,12 +295,17 @@ pub unsafe extern "C" fn dflog_get_array_column(
         set_last_error("null argument".into());
         return DFLOG_ERR_BAD_ARGUMENT;
     }
-    *out = ptr::null_mut();
+    // SAFETY: `out` is non-null and valid per the caller contract
+    unsafe { *out = ptr::null_mut() };
 
-    let (type_name, field) = match (
-        CStr::from_ptr(type_utf8).to_str(),
-        CStr::from_ptr(field_utf8).to_str(),
-    ) {
+    // SAFETY: both strings are non-null and NUL-terminated per the caller
+    // contract
+    let (type_name, field) = match unsafe {
+        (
+            CStr::from_ptr(type_utf8).to_str(),
+            CStr::from_ptr(field_utf8).to_str(),
+        )
+    } {
         (Ok(t), Ok(f)) => (t, f),
         _ => {
             set_last_error("type/field are not valid UTF-8".into());
@@ -285,7 +313,8 @@ pub unsafe extern "C" fn dflog_get_array_column(
         }
     };
 
-    let log = &(*file).log;
+    // SAFETY: `file` is a live dflog_open handle per the caller contract
+    let log = unsafe { &(*file).log };
 
     match catch_unwind(AssertUnwindSafe(|| {
         dflog_core::columns::get_array_column(log, type_name, field)
@@ -301,7 +330,8 @@ pub unsafe extern "C" fn dflog_get_array_column(
             });
             boxed.linenos = boxed.linenos_vec.as_ptr();
             boxed.values = boxed.values_vec.as_ptr();
-            *out = Box::into_raw(boxed);
+            // SAFETY: `out` is non-null and valid per the caller contract
+            unsafe { *out = Box::into_raw(boxed) };
             DFLOG_OK
         }
         Ok(Err(err)) => {
@@ -332,10 +362,16 @@ pub unsafe extern "C" fn dflog_time_base(
         return DFLOG_ERR_BAD_ARGUMENT;
     }
 
-    match catch_unwind(AssertUnwindSafe(|| (*file).log.time_base())) {
+    // SAFETY: `file` is a live dflog_open handle per the caller contract
+    let log = unsafe { &(*file).log };
+    match catch_unwind(AssertUnwindSafe(|| log.time_base())) {
         Ok(Some(base)) => {
-            *gps_start_unix_ms = base.gps_start_unix_ms;
-            *ms_offset = base.ms_offset;
+            // SAFETY: the out pointers are non-null and valid per the
+            // caller contract
+            unsafe {
+                *gps_start_unix_ms = base.gps_start_unix_ms;
+                *ms_offset = base.ms_offset
+            };
             DFLOG_OK
         }
         Ok(None) => {
@@ -357,7 +393,9 @@ pub unsafe extern "C" fn dflog_time_base(
 #[no_mangle]
 pub unsafe extern "C" fn dflog_array_column_free(column: *mut DflogArrayColumn) {
     if !column.is_null() {
-        drop(Box::from_raw(column));
+        // SAFETY: `column` came from Box::into_raw in dflog_get_array_column
+        // and is not used again per the caller contract
+        drop(unsafe { Box::from_raw(column) });
     }
 }
 
@@ -369,7 +407,9 @@ pub unsafe extern "C" fn dflog_array_column_free(column: *mut DflogArrayColumn) 
 #[no_mangle]
 pub unsafe extern "C" fn dflog_columns_free(columns: *mut DflogColumns) {
     if !columns.is_null() {
-        drop(Box::from_raw(columns));
+        // SAFETY: `columns` came from Box::into_raw in dflog_get_columns and
+        // is not used again per the caller contract
+        drop(unsafe { Box::from_raw(columns) });
     }
 }
 
@@ -391,8 +431,12 @@ pub unsafe extern "C" fn dflog_last_error(buf: *mut c_char, cap: usize) -> i32 {
         if bytes.len() + 1 > cap {
             return -(bytes.len() as i32 + 1);
         }
-        ptr::copy_nonoverlapping(bytes.as_ptr(), buf as *mut u8, bytes.len());
-        *buf.add(bytes.len()) = 0;
+        // SAFETY: `buf` holds at least `cap` writable bytes per the caller
+        // contract, and bytes.len() + 1 <= cap was just checked
+        unsafe {
+            ptr::copy_nonoverlapping(bytes.as_ptr(), buf as *mut u8, bytes.len());
+            *buf.add(bytes.len()) = 0
+        };
         bytes.len() as i32
     })
 }

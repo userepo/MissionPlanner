@@ -66,6 +66,7 @@ fn ascii_trim_nul(bytes: &[u8]) -> String {
 }
 
 /// A scanned log kept open for typed column queries.
+#[derive(Debug)]
 pub struct LogFile {
     map: Mmap,
     pub index: LogIndex,

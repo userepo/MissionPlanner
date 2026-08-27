@@ -105,6 +105,7 @@ fn decode_value(code: u8, payload: &[u8], at: usize) -> Option<Value> {
 }
 
 /// one record, decoded lazily field by field
+#[derive(Debug)]
 pub struct Record<'a> {
     pub lineno: u64,
     pub fmt: &'a FmtDef,
@@ -148,6 +149,7 @@ impl<'a> Record<'a> {
 }
 
 /// records in log order; `type_filter` limits to those type ids
+#[derive(Debug)]
 pub struct RecordIter<'a> {
     log: &'a LogFile,
     pos: usize,

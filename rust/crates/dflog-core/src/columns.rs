@@ -58,6 +58,7 @@ impl std::fmt::Display for ColumnError {
 impl std::error::Error for ColumnError {}
 
 /// Column-major result: `values[col * rows + row]`.
+#[derive(Debug)]
 pub struct Columns {
     pub rows: u64,
     pub cols: u32,
@@ -211,6 +212,7 @@ pub fn get_columns(
 pub const ARRAY_ELEMS: usize = 32;
 
 /// Row-major result: `values[row * ARRAY_ELEMS + elem]`.
+#[derive(Debug)]
 pub struct ArrayColumn {
     pub rows: u64,
     pub linenos: Vec<u64>,

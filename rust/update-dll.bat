@@ -1,7 +1,7 @@
 @echo off
 rem Rebuild the Rust workspace and refresh the checked-in native library the
 rem app ships (ExtLibs\Utilities\dflog_ffi.dll). Run after any change under
-rem rust\ and commit the updated DLL - the AbiVersionMatchesCheckedInDll unit
+rem rust\ and commit the updated DLL - the CheckedInDllMatchesExpectedAbi unit
 rem test fails when the checked-in copy lags the sources' ABI.
 setlocal
 cd /d "%~dp0"
