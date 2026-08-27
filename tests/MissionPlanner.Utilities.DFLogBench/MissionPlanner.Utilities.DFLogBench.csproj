@@ -1,0 +1,19 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net472</TargetFramework>
+    <OutputType>Exe</OutputType>
+    <IsPackable>false</IsPackable>
+    <LangVersion>latest</LangVersion>
+    <!-- the rust dflog_ffi.dll is x64; a 32-bit host silently falls back to
+         the managed path and the native measurements test nothing -->
+    <PlatformTarget>x64</PlatformTarget>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\..\ExtLibs\Utilities\MissionPlanner.Utilities.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="..\..\rust\target\release\dflog_ffi.dll"
+          Condition="Exists('..\..\rust\target\release\dflog_ffi.dll')"
+          CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+</Project>
