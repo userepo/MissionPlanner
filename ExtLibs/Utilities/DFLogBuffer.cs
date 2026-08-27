@@ -46,7 +46,8 @@ namespace MissionPlanner.Utilities
         /// the native library is present; the managed path remains the
         /// fallback. Precedence: explicit set (tests, config UI) > the
         /// DFLOG_NATIVE environment variable ("1"/"0") > the "dflog_native"
-        /// setting > off.
+        /// setting > ON by default (platforms without the library fall back
+        /// automatically via DFLogNative.Available).
         /// </summary>
         public static bool UseNativeScan
         {
@@ -69,12 +70,13 @@ namespace MissionPlanner.Utilities
 
             try
             {
-                return Settings.Instance.GetBoolean("dflog_native", false);
+                return Settings.Instance.GetBoolean("dflog_native", true);
             }
             catch
             {
-                // no settings store (headless/embedded use)
-                return false;
+                // no settings store (headless/embedded use); still safe -
+                // Available gates the actual native calls
+                return true;
             }
         }
 

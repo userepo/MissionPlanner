@@ -183,7 +183,8 @@ namespace MissionPlanner.GCSViews.ConfigurationView
 
             SetCheckboxFromConfig("analyticsoptout", chk_analytics);
 
-            SetCheckboxFromConfig("dflog_native", chk_dflognative);
+            // default-on: an absent setting must show as checked
+            chk_dflognative.Checked = Settings.Instance.GetBoolean("dflog_native", true);
 
             SetCheckboxFromConfig("CHK_GDIPlus", CHK_GDIPlus);
             SetCheckboxFromConfig("CHK_maprotation", CHK_maprotation);
