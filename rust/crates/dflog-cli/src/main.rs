@@ -98,7 +98,7 @@ fn dump(path: &Path, type_name: &str, fields_csv: &str) -> Result<(), String> {
         let mut line = cols.linenos[row].to_string();
         for col in 0..fields.len() {
             line.push(',');
-            line.push_str(&render::dotnet_g(cols.values[col * rows + row], 15));
+            line.push_str(&render::format_significant(cols.values[col * rows + row], 15));
         }
         writeln!(out, "{line}").map_err(|e| e.to_string())?;
     }
