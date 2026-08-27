@@ -1,0 +1,11 @@
+[workspace]
+resolver = "2"
+members = ["crates/dflog-core", "crates/dflog-ffi"]
+
+[workspace.package]
+edition = "2021"
+license = "GPL-3.0"
+
+[profile.release]
+lto = true
+codegen-units = 1

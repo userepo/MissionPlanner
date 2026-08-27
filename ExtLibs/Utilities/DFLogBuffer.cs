@@ -39,6 +39,17 @@ namespace MissionPlanner.Utilities
 
         bool binary = false;
 
+        /// <summary>
+        /// Use the Rust index scanner (rust/crates/dflog-ffi) for binary logs
+        /// when the native library is present; the managed scanner remains the
+        /// fallback. See docs/dflog-rust-core-plan.md phase A.
+        /// </summary>
+        public static bool UseNativeScan =
+            Environment.GetEnvironmentVariable("DFLOG_NATIVE") == "1";
+
+        /// <summary>Whether the last setlinecount used the native scanner.</summary>
+        internal static bool LastScanNative;
+
         object locker = new object();
 
         long indexcachelineno = -1;
@@ -103,24 +114,42 @@ namespace MissionPlanner.Utilities
                 if (binary)
                 {
                     long length = basestream.Length;
-                    while (basestream.Position < length)
+
+                    LastScanNative = false;
+                    if (UseNativeScan && !string.IsNullOrEmpty(_filename) &&
+                        DFLogNative.TryScan(_filename, out var nativeoffsets, out var nativetypes))
                     {
-                        var ans = binlog.ReadMessageTypeOffset(basestream, length);
+                        for (int i = 0; i < nativeoffsets.Length; i++)
+                        {
+                            byte type = nativetypes[i];
+                            messageindex[type].Add(nativeoffsets[i]);
+                            messageindexline[type].Add(lineCount);
 
-                        if (ans.MsgType == 0 && ans.Offset == 0)
-                            continue;
+                            linestartoffset.Add(nativeoffsets[i]);
+                            lineCount++;
+                        }
 
-                        byte type = ans.Item1;
-                        messageindex[type].Add(ans.Item2);
-                        messageindexline[type].Add(lineCount);
-
-                        linestartoffset.Add(ans.Item2);
-                        lineCount++;
-
-                        if (lineCount % 1000000 == 0)
-                            Console.WriteLine("reading lines " + lineCount + " " +
-                                              ((basestream.Position / (double)length) * 100.0));
+                        LastScanNative = true;
                     }
+                    else
+                        while (basestream.Position < length)
+                        {
+                            var ans = binlog.ReadMessageTypeOffset(basestream, length);
+
+                            if (ans.MsgType == 0 && ans.Offset == 0)
+                                continue;
+
+                            byte type = ans.Item1;
+                            messageindex[type].Add(ans.Item2);
+                            messageindexline[type].Add(lineCount);
+
+                            linestartoffset.Add(ans.Item2);
+                            lineCount++;
+
+                            if (lineCount % 1000000 == 0)
+                                Console.WriteLine("reading lines " + lineCount + " " +
+                                                  ((basestream.Position / (double)length) * 100.0));
+                        }
 
                     _count = lineCount;
 

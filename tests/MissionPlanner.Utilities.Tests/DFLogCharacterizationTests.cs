@@ -44,6 +44,51 @@ namespace MissionPlanner.Utilities.Tests
             AssertMatchesGolden(name, report);
         }
 
+        /// <summary>
+        /// Phase-A differential gate: the Rust index scanner must reproduce
+        /// the exact goldens the managed scanner produced.
+        /// </summary>
+        [Theory]
+        [InlineData("copter")]
+        [InlineData("plane")]
+        [InlineData("rover")]
+        public void CorpusLogMatchesGoldenWithNativeScan(string name)
+        {
+            var old = DFLogBuffer.UseNativeScan;
+            DFLogBuffer.UseNativeScan = true;
+            try
+            {
+                var report = GenerateReport(Path.Combine(TestDataDir, name + ".bin"));
+                Assert.True(DFLogBuffer.LastScanNative,
+                    "native scanner did not run - dflog_ffi.dll missing or scan failed");
+                AssertMatchesGolden(name, report);
+            }
+            finally
+            {
+                DFLogBuffer.UseNativeScan = old;
+            }
+        }
+
+        [Theory]
+        [InlineData("copter-truncated60")]
+        [InlineData("copter-truncated-midrecord")]
+        [InlineData("copter-corrupt-fmt")]
+        public void DerivedVariantMatchesGoldenWithNativeScan(string variant)
+        {
+            var old = DFLogBuffer.UseNativeScan;
+            DFLogBuffer.UseNativeScan = true;
+            try
+            {
+                DerivedVariantMatchesGolden(variant);
+                Assert.True(DFLogBuffer.LastScanNative,
+                    "native scanner did not run - dflog_ffi.dll missing or scan failed");
+            }
+            finally
+            {
+                DFLogBuffer.UseNativeScan = old;
+            }
+        }
+
         public static IEnumerable<object[]> Variants =>
             new[]
             {

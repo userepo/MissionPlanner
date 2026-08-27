@@ -16,5 +16,8 @@
   </ItemGroup>
   <ItemGroup>
     <None Include="testdata\**" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="..\..\rust\target\release\dflog_ffi.dll"
+          Condition="Exists('..\..\rust\target\release\dflog_ffi.dll')"
+          CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 </Project>
