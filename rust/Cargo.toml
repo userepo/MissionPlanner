@@ -1,6 +1,10 @@
 [workspace]
 resolver = "2"
-members = ["crates/dflog-core", "crates/dflog-ffi", "crates/dflog-cli"]
+members = ["crates/dflog-core", "crates/dflog-ffi", "crates/dflog-cli", "crates/dflog-py"]
+# dflog-py (the Python extension module) builds only when asked for
+# explicitly (cargo build -p dflog-py, or maturin); the default build and
+# test flows stay Python-free
+default-members = ["crates/dflog-core", "crates/dflog-ffi", "crates/dflog-cli"]
 exclude = ["fuzz"]
 
 [workspace.package]

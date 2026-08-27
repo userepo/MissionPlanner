@@ -155,34 +155,45 @@ impl<'a> Iterator for RecordIter<'a> {
     type Item = Record<'a>;
 
     fn next(&mut self) -> Option<Record<'a>> {
-        let data = self.log.data();
         while self.pos < self.log.index.types.len() {
             let i = self.pos;
             self.pos += 1;
-            let t = self.log.index.types[i];
             if let Some(filter) = &self.type_filter {
-                if !filter[t as usize] {
+                if !filter[self.log.index.types[i] as usize] {
                     continue;
                 }
             }
-            let Some(fmt) = self.log.fmts.get(&t) else {
-                continue; // record of a type with no FMT: not decodable
-            };
-            let start = self.log.index.offsets[i] as usize + 3;
-            let size = fmt.length.saturating_sub(3);
-            let end = (start + size).min(data.len());
-            let payload = if start < data.len() { &data[start..end] } else { &[] };
-            return Some(Record {
-                lineno: i as u64,
-                fmt,
-                payload,
-            });
+            if let Some(record) = self.log.record_at(i) {
+                return Some(record);
+            }
+            // record of a type with no FMT: not decodable
         }
         None
     }
 }
 
 impl LogFile {
+    /// the decodable record at position `i` of the scan index; None when
+    /// out of range or the record's type has no FMT
+    pub fn record_at(&self, i: usize) -> Option<Record<'_>> {
+        let t = *self.index.types.get(i)?;
+        let fmt = self.fmts.get(&t)?;
+        let data = self.data();
+        let start = self.index.offsets[i] as usize + 3;
+        let size = fmt.length.saturating_sub(3);
+        let end = (start + size).min(data.len());
+        let payload = if start < data.len() {
+            &data[start..end]
+        } else {
+            &[]
+        };
+        Some(Record {
+            lineno: i as u64,
+            fmt,
+            payload,
+        })
+    }
+
     /// every decodable record in log order
     pub fn records(&self) -> RecordIter<'_> {
         RecordIter {
@@ -267,5 +278,17 @@ mod tests {
         for record in log.records() {
             let _ = record.values();
         }
+    }
+
+    /// random access must see exactly what iteration sees
+    #[test]
+    fn record_at_matches_iteration() {
+        let log = corpus("copter.bin");
+        for record in log.records_of(&["ATT"]).take(50) {
+            let direct = log.record_at(record.lineno as usize).expect("record_at");
+            assert_eq!(direct.type_name(), record.type_name());
+            assert_eq!(direct.values(), record.values());
+        }
+        assert!(log.record_at(usize::MAX).is_none());
     }
 }
