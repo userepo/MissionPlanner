@@ -6218,6 +6218,21 @@ Mission Planner waits for 2 valid heartbeat packets before connecting
             }
             catch
             {
+                // tell the vehicle to stop streaming - an abandoned download otherwise
+                // keeps LOG_DATA flowing and breaks the next log operation
+                try
+                {
+                    var end = new mavlink_log_request_end_t
+                    {
+                        target_system = sysid,
+                        target_component = compid
+                    };
+                    generatePacket((byte) MAVLINK_MSG_ID.LOG_REQUEST_END, end);
+                }
+                catch
+                {
+                }
+
                 // dont leave a partial file behind on timeout/cancel/link loss
                 try
                 {

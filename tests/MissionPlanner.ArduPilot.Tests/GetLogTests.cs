@@ -26,6 +26,9 @@ namespace MissionPlanner.ArduPilot.Tests
             public readonly MAVLinkInterface Mav = new MAVLinkInterface();
             public readonly List<MAVLink.mavlink_log_request_data_t> Requests = new List<MAVLink.mavlink_log_request_data_t>();
             public Action<MAVLink.mavlink_log_request_data_t> OnRequest;
+            int _endRequests;
+
+            public int EndRequests => Volatile.Read(ref _endRequests);
 
             readonly MAVLink.MavlinkParse _parse = new MAVLink.MavlinkParse();
             readonly byte[] _log;
@@ -45,6 +48,12 @@ namespace MissionPlanner.ArduPilot.Tests
                     }
                     catch
                     {
+                        return;
+                    }
+
+                    if (msg.msgid == (uint)MAVLink.MAVLINK_MSG_ID.LOG_REQUEST_END)
+                    {
+                        Interlocked.Increment(ref _endRequests);
                         return;
                     }
 
@@ -304,6 +313,8 @@ namespace MissionPlanner.ArduPilot.Tests
                 }
 
                 Assert.False(File.Exists(path), "partial file left behind after cancel");
+                Assert.True(vehicle.EndRequests > 0,
+                    "LOG_REQUEST_END not sent - the vehicle would keep streaming LOG_DATA");
             }
         }
 
