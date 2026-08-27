@@ -83,6 +83,19 @@ impl LogFile {
             unsafe { Mmap::map(&file)? }
         };
         let len = file.metadata()?.len() as usize;
+        Self::build(map, len)
+    }
+
+    /// Open an in-memory log image (fuzzing, and stream-backed callers that
+    /// have no file to map).
+    pub fn open_bytes(data: &[u8]) -> io::Result<LogFile> {
+        let mut map = memmap2::MmapMut::map_anon(data.len().max(1))?;
+        map[..data.len()].copy_from_slice(data);
+        let len = data.len();
+        Self::build(map.make_read_only()?, len)
+    }
+
+    fn build(map: Mmap, len: usize) -> io::Result<LogFile> {
         let index = scan(&map[..len]);
 
         // re-read the FMT payloads the scan indexed (type 0x80 records)

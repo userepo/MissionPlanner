@@ -1,0 +1,36 @@
+[package]
+name = "dflog-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2021"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4.13"
+dflog-core = { path = "../crates/dflog-core" }
+
+[[bin]]
+name = "scan"
+path = "fuzz_targets/scan.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "convert"
+path = "fuzz_targets/convert.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "columns"
+path = "fuzz_targets/columns.rs"
+test = false
+doc = false
+bench = false
+
+# not part of the parent workspace: libfuzzer only builds on nightly/linux
+[workspace]

@@ -24,8 +24,23 @@ Build:
 ```bash
 cd rust
 cargo build --release   # produces target/release/dflog_ffi.dll
-cargo test
+cargo test              # includes the deterministic mutation-fuzz smoke test
 ```
+
+Fuzzing (phase D): `fuzz/` holds cargo-fuzz targets (`scan`, `convert`,
+`columns`) - excluded from the workspace since libFuzzer needs nightly and
+prefers Linux; run under WSL:
+
+```bash
+rustup toolchain install nightly && cargo install cargo-fuzz
+cd rust
+mkdir -p fuzz/corpus/scan
+head -c 8192 ../tests/MissionPlanner.Utilities.Tests/testdata/copter.bin > fuzz/corpus/scan/seed
+cargo +nightly fuzz run scan -- -max_total_time=300 -max_len=65536
+```
+
+Crashing inputs land in `fuzz/artifacts/<target>/`; distill every finding
+into `crates/dflog-core/tests/fuzz_smoke.rs` as a permanent regression case.
 
 The test csproj copies `dflog_ffi.dll` to its output when present. At
 runtime the native scanner is opt-in via `DFLogBuffer.UseNativeScan`
