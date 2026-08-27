@@ -830,7 +830,7 @@ namespace MissionPlanner
 
             var dflog = logdata.dflog;
 
-            // typed fast path (docs/dflog-rust-core-plan.md phase B)
+            // typed fast path via the native dflog columns
             if (!TryMagColumnsNative(logdata, data, data2, data3, ofsDoubles, ofsDoubles2, ofsDoubles3, vertexes))
             foreach (var line in logdata.GetEnumeratorType(new[] { "MAG", "MAG2", "MAG3" }))
             {

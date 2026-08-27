@@ -1497,7 +1497,7 @@ main()
                 return;
             }
 
-            // typed fast path (docs/dflog-rust-core-plan.md phase B)
+            // typed fast path via the native dflog columns
             if (GraphItem_GetListNative(fieldname, type, dataModifier, left, instance, extra_label))
                 return;
 

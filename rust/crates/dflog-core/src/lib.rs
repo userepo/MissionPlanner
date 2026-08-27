@@ -1,6 +1,6 @@
 //! ArduPilot dataflash (`.bin`) log indexing.
 //!
-//! Phase A of docs/dflog-rust-core-plan.md: a byte-exact port of the index
+//! A byte-exact port of the index
 //! scan performed by MissionPlanner's `BinaryLog.ReadMessageTypeOffset` /
 //! `DFLogBuffer.setlinecount` (binary branch). The C# implementation is the
 //! behavioral reference; every quirk below is intentional parity:

@@ -11,8 +11,8 @@ using Xunit;
 namespace MissionPlanner.Utilities.Tests
 {
     /// <summary>
-    /// Phase-0 characterization suite for the dataflash log core (BinaryLog /
-    /// DFLog / DFLogBuffer) - see docs/dflog-rust-core-plan.md.
+    /// Characterization suite for the dataflash log core (BinaryLog /
+    /// DFLog / DFLogBuffer).
     ///
     /// These tests snapshot the CURRENT parser's observable behavior over a
     /// corpus of SITL-generated logs (plus deterministically derived corrupt

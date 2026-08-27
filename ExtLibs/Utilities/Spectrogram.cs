@@ -44,7 +44,7 @@ namespace MissionPlanner.Utilities
                     int instance = -1;
                     double multiplier = -1;
 
-                    // typed fast path (docs/dflog-rust-core-plan.md phase B)
+                    // typed fast path via the native dflog columns
                     if (TryBatchDataNative(cb, sensorno, sensor, field, out var nativerate, out var nativedata))
                     {
                         sample_rate = nativerate;

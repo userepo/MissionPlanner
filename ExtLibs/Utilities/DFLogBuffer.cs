@@ -46,7 +46,7 @@ namespace MissionPlanner.Utilities
         /// the native library is present; the managed path remains the
         /// fallback. Precedence: explicit set (tests, config UI) > the
         /// DFLOG_NATIVE environment variable ("1"/"0") > the "dflog_native"
-        /// setting > off. See docs/dflog-rust-core-plan.md.
+        /// setting > off.
         /// </summary>
         public static bool UseNativeScan
         {
@@ -91,7 +91,7 @@ namespace MissionPlanner.Utilities
         object locker = new object();
 
         /// <summary>
-        /// Typed fast path (phase B, docs/dflog-rust-core-plan.md): decode all
+        /// Typed fast path via the native dflog library: decode all
         /// records of <paramref name="type"/> straight from the file into one
         /// double column per field, bypassing the per-row string conversion.
         /// Row order matches GetEnumeratorType(type); linenos are the same

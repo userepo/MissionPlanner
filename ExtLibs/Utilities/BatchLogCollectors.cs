@@ -4,8 +4,8 @@ using System.Collections.Generic;
 namespace MissionPlanner.Utilities
 {
     /// <summary>
-    /// Typed fast paths for fftui's sensor-data collection loops
-    /// (docs/dflog-rust-core-plan.md phase B): whole-column decode replayed
+    /// Typed fast paths for fftui's sensor-data collection loops via the
+    /// native dflog library: whole-column decode replayed
     /// by line number instead of per-row DFItem enumeration. Each returns
     /// false (caller runs its legacy enumerator loop) when the native path
     /// is off/unavailable or the expected message types are missing.

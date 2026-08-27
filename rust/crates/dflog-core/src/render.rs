@@ -1,5 +1,5 @@
 //! Text rendering of a dataflash log, byte-compatible with the C#
-//! `BinaryLog.ConvertBin` (phase C of docs/dflog-rust-core-plan.md).
+//! `BinaryLog.ConvertBin`.
 //!
 //! The reference is `BinaryLog.ReadMessage` running headless (no
 //! `onFlightMode` subscriber, so `M` fields render as the raw mode number -

@@ -1,4 +1,4 @@
-//! Deterministic mutation fuzzing (phase D of docs/dflog-rust-core-plan.md):
+//! Deterministic mutation fuzzing:
 //! a fast always-on regression net asserting that no input - corrupted,
 //! truncated, spliced or random - can panic the scanner, the column
 //! decoders or the text renderer. The coverage-guided campaign lives in

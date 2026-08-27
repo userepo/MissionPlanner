@@ -1,7 +1,7 @@
 # MissionPlanner.LogBrowseTests
 
 Manual GUI verification harness for the LogBrowse typed-column fast path
-(docs/dflog-rust-core-plan.md phase B). Not part of any automated run - it
+(the native dflog library). Not part of any automated run - it
 opens the real `LogBrowse` WinForms window on screen.
 
 It loads a dataflash log into the actual `LogBrowse` form, invokes the real

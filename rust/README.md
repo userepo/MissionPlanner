@@ -5,7 +5,7 @@ toolchain, one CI surface (`rust/**`). Layout follows the mixed-language
 monorepo convention (cf. Signal's libsignal): later components slot in as
 additional members under `crates/`.
 
-Current members (see docs/dflog-rust-core-plan.md):
+Current members:
 
 - `crates/dflog-core` - ArduPilot dataflash (`.bin`) log parsing/indexing.
   Behaviorally a byte-exact port of the C# `BinaryLog` scanner; the phase-0

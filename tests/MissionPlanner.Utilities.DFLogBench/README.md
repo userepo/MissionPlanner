@@ -1,7 +1,7 @@
 # MissionPlanner.Utilities.DFLogBench
 
-Manual performance harness for the dataflash log core
-(docs/dflog-rust-core-plan.md): native (rust/) vs managed paths. Not part of
+Manual performance harness for the dataflash log core: native (rust/) vs
+managed paths. Not part of
 any automated run - results are wall-clock measurements on whatever machine
 runs them; always take several runs (single samples mislead - one outlier
 during phase-C work read 55% slow).

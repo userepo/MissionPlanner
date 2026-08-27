@@ -1,4 +1,4 @@
-//! Typed columnar extraction (phase B of docs/dflog-rust-core-plan.md).
+//! Typed columnar extraction by the native dflog library.
 //!
 //! Decodes all records of one message type into `f64` columns for the
 //! requested field labels, plus the global record index ("line number") per

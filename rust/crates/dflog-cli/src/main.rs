@@ -1,5 +1,4 @@
-//! `dflog` - ArduPilot dataflash (.bin) log tool (phase C of
-//! docs/dflog-rust-core-plan.md).
+//! `dflog` - ArduPilot dataflash (.bin) log tool.
 //!
 //! Commands:
 //!   dflog info <log.bin>                     summary: records, types, formats

@@ -1,8 +1,8 @@
 # MissionPlanner.Utilities.Tests
 
-Phase-0 characterization suite for the dataflash log core (`BinaryLog` /
-`DFLog` / `DFLogBuffer`) - the safety net for the Rust rewrite planned in
-[docs/dflog-rust-core-plan.md](../../docs/dflog-rust-core-plan.md).
+Characterization suite for the dataflash log core (`BinaryLog` /
+`DFLog` / `DFLogBuffer`) - the safety net for the Rust implementation
+under `rust/`.
 
 `DFLogCharacterizationTests` snapshots the current parser's observable
 behavior (counts, FMT/FMTU/unit tables, sample rows, per-type record counts,

@@ -5,10 +5,9 @@ using log4net;
 namespace MissionPlanner.Utilities
 {
     /// <summary>
-    /// P/Invoke bindings for the Rust dataflash index scanner
-    /// (rust/crates/dflog-ffi). See docs/dflog-rust-core-plan.md phase A.
-    /// All failures degrade to "not available" so callers can fall back to
-    /// the managed scanner.
+    /// P/Invoke bindings for the Rust dataflash log core
+    /// (rust/crates/dflog-ffi). All failures degrade to "not available" so
+    /// callers can fall back to the managed scanner.
     /// </summary>
     internal static class DFLogNative
     {
