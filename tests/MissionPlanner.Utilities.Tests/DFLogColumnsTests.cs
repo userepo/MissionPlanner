@@ -131,6 +131,116 @@ namespace MissionPlanner.Utilities.Tests
             }
         }
 
+        /// <summary>
+        /// Array-column parity on a synthetic ISBD-like log: the native
+        /// short[32] rows must equal the managed BinaryLog.UnionArray shorts.
+        /// </summary>
+        [Fact]
+        public void ArrayColumnMatchesUnionArray()
+        {
+            // FMT: type 0xAB "ISB", format "Ha", labels "N,x", len 3+2+64
+            var data = new List<byte> { 0xA3, 0x95, 0x80 };
+            var fmt = new byte[86];
+            fmt[0] = 0xAB;
+            fmt[1] = 3 + 2 + 64;
+            System.Text.Encoding.ASCII.GetBytes("ISB").CopyTo(fmt, 2);
+            System.Text.Encoding.ASCII.GetBytes("Ha").CopyTo(fmt, 6);
+            System.Text.Encoding.ASCII.GetBytes("N,x").CopyTo(fmt, 22);
+            data.AddRange(fmt);
+
+            var rnd = new Random(7);
+            for (var rec = 0; rec < 5; rec++)
+            {
+                data.AddRange(new byte[] { 0xA3, 0x95, 0xAB });
+                data.AddRange(BitConverter.GetBytes((ushort)rec));
+                for (var e = 0; e < 32; e++)
+                    data.AddRange(BitConverter.GetBytes((short)rnd.Next(short.MinValue, short.MaxValue)));
+            }
+
+            var dir = Path.Combine(Path.GetTempPath(), "DFLogArr-" + Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(dir);
+            var old = DFLogBuffer.UseNativeScan;
+            DFLogBuffer.UseNativeScan = true;
+            try
+            {
+                var file = Path.Combine(dir, "isb.bin");
+                File.WriteAllBytes(file, data.ToArray());
+
+                using (var buffer = new DFLogBuffer(file))
+                {
+                    var ok = buffer.TryGetArrayColumnNative("ISB", "x", out var linenos, out var rows);
+                    Assert.True(ok, "native array column query failed - dflog_ffi.dll missing?");
+                    Assert.Equal(5, rows.Length);
+
+                    var idx = buffer.dflog.FindMessageOffset("ISB", "x");
+                    var managedLinenos = new List<long>();
+                    var managedRows = new List<short[]>();
+                    foreach (var item in buffer.GetEnumeratorType("ISB"))
+                    {
+                        managedLinenos.Add(item.lineno);
+                        var ua = (BinaryLog.UnionArray)item.raw[idx];
+                        managedRows.Add(ua.Shorts.ToArray());
+                    }
+
+                    Assert.Equal(managedLinenos, linenos);
+                    for (var r = 0; r < rows.Length; r++)
+                        Assert.Equal(managedRows[r], rows[r]);
+
+                    // non-array field fails cleanly
+                    Assert.False(buffer.TryGetArrayColumnNative("ISB", "N", out _, out _));
+                }
+            }
+            finally
+            {
+                DFLogBuffer.UseNativeScan = old;
+                try
+                {
+                    Directory.Delete(dir, true);
+                }
+                catch
+                {
+                }
+            }
+        }
+
+        /// <summary>
+        /// Same parity check over real vehicle data: ISBD batch samples from
+        /// a SITL log recorded with INS_LOG_BAT_MASK=1.
+        /// </summary>
+        [Fact]
+        public void ArrayColumnMatchesUnionArrayOnRealIsbdLog()
+        {
+            var old = DFLogBuffer.UseNativeScan;
+            DFLogBuffer.UseNativeScan = true;
+            try
+            {
+                using (var buffer = new DFLogBuffer(Path.Combine(TestDataDir, "copter-isbd.bin")))
+                {
+                    Assert.Contains("ISBD", buffer.SeenMessageTypes);
+
+                    var ok = buffer.TryGetArrayColumnNative("ISBD", "x", out var linenos, out var rows);
+                    Assert.True(ok);
+                    Assert.True(rows.Length > 0, "no ISBD rows decoded");
+
+                    var idx = buffer.dflog.FindMessageOffset("ISBD", "x");
+                    var r = 0;
+                    foreach (var item in buffer.GetEnumeratorType("ISBD"))
+                    {
+                        Assert.Equal(item.lineno, linenos[r]);
+                        var ua = (BinaryLog.UnionArray)item.raw[idx];
+                        Assert.Equal(ua.Shorts.ToArray(), rows[r]);
+                        r++;
+                    }
+
+                    Assert.Equal(r, rows.Length);
+                }
+            }
+            finally
+            {
+                DFLogBuffer.UseNativeScan = old;
+            }
+        }
+
         [Fact]
         public void UnknownFieldFailsCleanly()
         {

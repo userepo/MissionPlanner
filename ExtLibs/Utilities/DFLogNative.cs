@@ -16,7 +16,7 @@ namespace MissionPlanner.Utilities
             LogManager.GetLogger(System.Reflection.MethodBase.GetCurrentMethod().DeclaringType);
 
         const string Dll = "dflog_ffi";
-        const uint AbiVersion = 2;
+        const uint AbiVersion = 3;
 
         [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)]
         static extern uint dflog_abi_version();
@@ -42,6 +42,12 @@ namespace MissionPlanner.Utilities
         [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)]
         static extern void dflog_columns_free(IntPtr columns);
 
+        [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)]
+        static extern int dflog_get_array_column(IntPtr file, byte[] typeUtf8, byte[] fieldUtf8, out IntPtr column);
+
+        [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)]
+        static extern void dflog_array_column_free(IntPtr column);
+
         [StructLayout(LayoutKind.Sequential)]
         struct NativeIndex
         {
@@ -56,6 +62,16 @@ namespace MissionPlanner.Utilities
         {
             public ulong rows;
             public uint cols;
+            public IntPtr linenos;
+            public IntPtr values;
+            // followed by rust-owned storage; opaque to this side
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
+        struct NativeArrayColumn
+        {
+            public ulong rows;
+            public uint elems;
             public IntPtr linenos;
             public IntPtr values;
             // followed by rust-owned storage; opaque to this side
@@ -152,6 +168,63 @@ namespace MissionPlanner.Utilities
                 {
                     if (handle != IntPtr.Zero)
                         dflog_columns_free(handle);
+                }
+            }
+
+            /// <summary>
+            /// Decode the `a` (int16[32]) array field of every record of
+            /// <paramref name="type"/>, one short[] per row, plus the global
+            /// record index per row. Returns false (never throws) on failure.
+            /// </summary>
+            public bool TryGetArrayColumn(string type, string field, out long[] linenos, out short[][] rows)
+            {
+                linenos = null;
+                rows = null;
+
+                if (_file == IntPtr.Zero)
+                    return false;
+
+                var handle = IntPtr.Zero;
+                try
+                {
+                    var rc = dflog_get_array_column(_file, Utf8Z(type), Utf8Z(field), out handle);
+                    if (rc != 0)
+                    {
+                        log.WarnFormat("dflog_get_array_column({0}.{1}) failed ({2}): {3}", type, field, rc,
+                            LastError());
+                        return false;
+                    }
+
+                    var native = Marshal.PtrToStructure<NativeArrayColumn>(handle);
+                    if (native.rows > int.MaxValue)
+                        return false;
+
+                    var count = (int)native.rows;
+                    var elems = (int)native.elems;
+                    linenos = new long[count];
+                    if (count > 0)
+                        Marshal.Copy(native.linenos, linenos, 0, count);
+
+                    rows = new short[count][];
+                    for (var r = 0; r < count; r++)
+                    {
+                        rows[r] = new short[elems];
+                        Marshal.Copy(IntPtr.Add(native.values, r * elems * sizeof(short)), rows[r], 0, elems);
+                    }
+
+                    return true;
+                }
+                catch (Exception ex)
+                {
+                    log.Warn("dflog_get_array_column failed", ex);
+                    linenos = null;
+                    rows = null;
+                    return false;
+                }
+                finally
+                {
+                    if (handle != IntPtr.Zero)
+                        dflog_array_column_free(handle);
                 }
             }
 

@@ -22,7 +22,7 @@ pub const DFLOG_ERR_IO: i32 = -2;
 pub const DFLOG_ERR_PANIC: i32 = -3;
 
 /// Bumped when the ABI changes shape; checked by the C# side.
-pub const DFLOG_ABI_VERSION: u32 = 2;
+pub const DFLOG_ABI_VERSION: u32 = 3;
 
 pub const DFLOG_ERR_QUERY: i32 = -4;
 
@@ -231,6 +231,88 @@ pub unsafe extern "C" fn dflog_get_columns(
             set_last_error("panic in dflog_get_columns".into());
             DFLOG_ERR_PANIC
         }
+    }
+}
+
+/// Row-major array-column result: `values[row * elems + e]`, elems = 32 for
+/// the `a` (int16[32]) format.
+#[repr(C)]
+pub struct DflogArrayColumn {
+    pub rows: u64,
+    pub elems: u32,
+    pub linenos: *const u64,
+    pub values: *const i16,
+    // rust-owned storage; opaque to the C side beyond `values`
+    linenos_vec: Vec<u64>,
+    values_vec: Vec<i16>,
+}
+
+/// Decode the `a` (int16[32]) array `field_utf8` of every `type_utf8` record.
+/// Release the result with `dflog_array_column_free`.
+///
+/// # Safety
+/// `file` must be a live `dflog_open` handle; the strings must be valid
+/// NUL-terminated UTF-8; `out` must be a valid pointer.
+#[no_mangle]
+pub unsafe extern "C" fn dflog_get_array_column(
+    file: *const DflogFile,
+    type_utf8: *const c_char,
+    field_utf8: *const c_char,
+    out: *mut *mut DflogArrayColumn,
+) -> i32 {
+    if file.is_null() || type_utf8.is_null() || field_utf8.is_null() || out.is_null() {
+        set_last_error("null argument".into());
+        return DFLOG_ERR_BAD_ARGUMENT;
+    }
+    *out = ptr::null_mut();
+
+    let (type_name, field) = match (CStr::from_ptr(type_utf8).to_str(), CStr::from_ptr(field_utf8).to_str()) {
+        (Ok(t), Ok(f)) => (t, f),
+        _ => {
+            set_last_error("type/field are not valid UTF-8".into());
+            return DFLOG_ERR_BAD_ARGUMENT;
+        }
+    };
+
+    let log = &(*file).log;
+
+    match catch_unwind(AssertUnwindSafe(|| {
+        dflog_core::columns::get_array_column(log, type_name, field)
+    })) {
+        Ok(Ok(col)) => {
+            let mut boxed = Box::new(DflogArrayColumn {
+                rows: col.rows,
+                elems: dflog_core::columns::ARRAY_ELEMS as u32,
+                linenos: ptr::null(),
+                values: ptr::null(),
+                linenos_vec: col.linenos,
+                values_vec: col.values,
+            });
+            boxed.linenos = boxed.linenos_vec.as_ptr();
+            boxed.values = boxed.values_vec.as_ptr();
+            *out = Box::into_raw(boxed);
+            DFLOG_OK
+        }
+        Ok(Err(err)) => {
+            set_last_error(err.to_string());
+            DFLOG_ERR_QUERY
+        }
+        Err(_) => {
+            set_last_error("panic in dflog_get_array_column".into());
+            DFLOG_ERR_PANIC
+        }
+    }
+}
+
+/// Release a result returned by `dflog_get_array_column`.
+///
+/// # Safety
+/// `column` must come from `dflog_get_array_column` and not be used
+/// afterwards. Null is ignored.
+#[no_mangle]
+pub unsafe extern "C" fn dflog_array_column_free(column: *mut DflogArrayColumn) {
+    if !column.is_null() {
+        drop(Box::from_raw(column));
     }
 }
 

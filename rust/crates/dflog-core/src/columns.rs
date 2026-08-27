@@ -22,6 +22,8 @@ pub enum ColumnError {
     UnknownField { field: String, available: String },
     /// field exists but has no numeric decoding (n/N/Z strings, `a` arrays)
     NotNumeric { field: String, code: char },
+    /// field is not an `a` (int16[32]) array
+    NotArray { field: String, code: char },
     /// FMT format/labels column counts disagree; no stable field mapping
     MalformedFormat(String),
 }
@@ -35,6 +37,9 @@ impl std::fmt::Display for ColumnError {
             }
             ColumnError::NotNumeric { field, code } => {
                 write!(f, "field {field} (format '{code}') is not numeric")
+            }
+            ColumnError::NotArray { field, code } => {
+                write!(f, "field {field} (format '{code}') is not an int16 array")
             }
             ColumnError::MalformedFormat(t) => write!(f, "malformed FMT for {t}"),
         }
@@ -185,6 +190,79 @@ pub fn get_columns(log: &LogFile, type_name: &str, fields: &[&str]) -> Result<Co
     })
 }
 
+/// Elements per `a`-format field: int16_t[32].
+pub const ARRAY_ELEMS: usize = 32;
+
+/// Row-major result: `values[row * ARRAY_ELEMS + elem]`.
+pub struct ArrayColumn {
+    pub rows: u64,
+    pub linenos: Vec<u64>,
+    pub values: Vec<i16>,
+}
+
+/// Decode the `a` (int16[32]) array `field` of every `type_name` record.
+/// Bytes past end-of-file decode as zero, matching the C# partial read into
+/// a zeroed buffer that backs `BinaryLog.UnionArray`.
+pub fn get_array_column(
+    log: &LogFile,
+    type_name: &str,
+    field: &str,
+) -> Result<ArrayColumn, ColumnError> {
+    let &id = log
+        .name_to_id
+        .get(type_name)
+        .ok_or_else(|| ColumnError::UnknownType(type_name.into()))?;
+    let fmt = log
+        .fmts
+        .get(&id)
+        .ok_or_else(|| ColumnError::UnknownType(type_name.into()))?;
+
+    let codes: Vec<char> = fmt.format.chars().collect();
+    if codes.len() != fmt.labels.len() {
+        return Err(ColumnError::MalformedFormat(type_name.into()));
+    }
+
+    let pos = fmt
+        .labels
+        .iter()
+        .position(|l| l == field)
+        .ok_or_else(|| ColumnError::UnknownField {
+            field: field.into(),
+            available: fmt.labels.join(","),
+        })?;
+    if codes[pos] != 'a' {
+        return Err(ColumnError::NotArray { field: field.into(), code: codes[pos] });
+    }
+
+    let field_offset: usize = codes[..pos].iter().map(|&c| field_size(c).unwrap_or(0)).sum();
+
+    let data = log.data();
+    let mut linenos = Vec::new();
+    for (i, &t) in log.index.types.iter().enumerate() {
+        if t == id {
+            linenos.push(i as u64);
+        }
+    }
+
+    let rows = linenos.len();
+    let mut values = vec![0i16; rows * ARRAY_ELEMS];
+    for (row, &lineno) in linenos.iter().enumerate() {
+        let start = log.index.offsets[lineno as usize] as usize + 3 + field_offset;
+        let out = &mut values[row * ARRAY_ELEMS..(row + 1) * ARRAY_ELEMS];
+        for (e, slot) in out.iter_mut().enumerate() {
+            let at = start + e * 2;
+            let b = read_zero_padded(data, at, 2);
+            *slot = i16::from_le_bytes([b[0], b[1]]);
+        }
+    }
+
+    Ok(ArrayColumn {
+        rows: rows as u64,
+        linenos,
+        values,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -196,6 +274,53 @@ mod tests {
         assert_eq!(half_to_f32(0xC000), -2.0);
         assert_eq!(half_to_f32(0x7BFF), 65504.0);
         assert!(half_to_f32(0x7C00).is_infinite());
+    }
+
+    #[test]
+    fn decodes_int16_array_field() {
+        // synthetic ISBD-like type 0xAB "ISB" format "Ha" labels "N,x":
+        // one record with N=7 and x = [0,1,2,...,31] plus a second record
+        // whose array is cut off by end-of-file (zero-padded tail)
+        let mut data = vec![0xA3, 0x95, 0x80];
+        let mut fmt = vec![0u8; 86];
+        fmt[0] = 0xAB;
+        fmt[1] = (3 + 2 + 64) as u8;
+        fmt[2..5].copy_from_slice(b"ISB");
+        fmt[6..8].copy_from_slice(b"Ha");
+        fmt[22..25].copy_from_slice(b"N,x");
+        data.extend_from_slice(&fmt);
+
+        data.extend_from_slice(&[0xA3, 0x95, 0xAB]);
+        data.extend_from_slice(&7u16.to_le_bytes());
+        for v in 0..32i16 {
+            data.extend_from_slice(&v.to_le_bytes());
+        }
+
+        data.extend_from_slice(&[0xA3, 0x95, 0xAB]);
+        data.extend_from_slice(&8u16.to_le_bytes());
+        for v in 0..5i16 {
+            data.extend_from_slice(&(100 + v).to_le_bytes());
+        }
+        // eof mid-array
+
+        let dir = std::env::temp_dir().join(format!("dflog-arr-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("isb.bin");
+        std::fs::write(&path, &data).unwrap();
+
+        let log = LogFile::open(&path).unwrap();
+        let col = get_array_column(&log, "ISB", "x").unwrap();
+        assert_eq!(col.rows, 2);
+        assert_eq!(col.linenos, vec![1, 2]);
+        assert_eq!(&col.values[..32], (0..32i16).collect::<Vec<_>>().as_slice());
+        assert_eq!(&col.values[32..37], &[100, 101, 102, 103, 104]);
+        assert!(col.values[37..].iter().all(|&v| v == 0));
+
+        assert!(matches!(get_array_column(&log, "ISB", "N"),
+            Err(ColumnError::NotArray { .. })));
+
+        drop(log);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

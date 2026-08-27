@@ -44,6 +44,13 @@ namespace MissionPlanner.Utilities
                     int instance = -1;
                     double multiplier = -1;
 
+                    // typed fast path (docs/dflog-rust-core-plan.md phase B)
+                    if (TryBatchDataNative(cb, sensorno, sensor, field, out var nativerate, out var nativedata))
+                    {
+                        sample_rate = nativerate;
+                        data = nativedata;
+                    }
+                    else
                     data = cb.GetEnumeratorType(new string[] { "ISBH", "ISBD" })
                         .SelectMany(
                             item =>
@@ -245,6 +252,70 @@ namespace MissionPlanner.Utilities
 
                 return img;
             }
+        }
+
+        /// <summary>
+        /// Typed fast path for the ISBH/ISBD batch extraction: numeric and
+        /// array columns merged by line number, replaying the header state
+        /// machine exactly like the legacy enumerator pass. Returns false
+        /// (caller runs the legacy path) when the native path is off or the
+        /// columns cannot be fetched.
+        /// </summary>
+        static bool TryBatchDataNative(DFLogBuffer cb, int sensorno, int sensor, string field,
+            out double sampleRate, out (double time, double d)[] data)
+        {
+            sampleRate = -1;
+            data = null;
+
+            // legacy derives the ISBD array field from the last letter, e.g. AccX -> x
+            var arrayField = field.ToLower().Substring(field.Length - 1);
+
+            if (!cb.TryGetColumnsNative("ISBH",
+                    new[] { "N", "type", "instance", "smp_rate", "mul" },
+                    out var hdrLines, out var hdr))
+                return false;
+
+            if (!cb.TryGetColumnsNative("ISBD", new[] { "N", "TimeUS" }, out var smpLines, out var smp) ||
+                !cb.TryGetArrayColumnNative("ISBD", arrayField, out var arrLines, out var samples))
+                return false;
+
+            var list = new List<(double time, double d)>(samples.Length * 32);
+
+            int Ns = -1, type1 = -1, instance = -1;
+            double multiplier = -1;
+
+            int h = 0, s = 0;
+            while (h < hdrLines.Length || s < smpLines.Length)
+            {
+                var takeHeader = s >= smpLines.Length || (h < hdrLines.Length && hdrLines[h] <= smpLines[s]);
+                if (takeHeader)
+                {
+                    Ns = (int)hdr[0][h];
+                    type1 = (int)hdr[1][h];
+                    instance = (int)hdr[2][h];
+                    if (instance == sensorno && type1 == sensor)
+                    {
+                        sampleRate = hdr[3][h];
+                        multiplier = hdr[4][h];
+                    }
+
+                    h++;
+                }
+                else
+                {
+                    if ((int)smp[0][s] == Ns && instance == sensorno && type1 == sensor)
+                    {
+                        var time = smp[1][s];
+                        foreach (var sample in samples[s])
+                            list.Add((time, sample / multiplier));
+                    }
+
+                    s++;
+                }
+            }
+
+            data = list.ToArray();
+            return true;
         }
 
         static double SCALE = 20 / Math.Log(10);

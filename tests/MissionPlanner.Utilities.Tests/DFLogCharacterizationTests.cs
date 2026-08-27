@@ -38,6 +38,7 @@ namespace MissionPlanner.Utilities.Tests
         [InlineData("copter")]
         [InlineData("plane")]
         [InlineData("rover")]
+        [InlineData("copter-isbd")]
         public void CorpusLogMatchesGolden(string name)
         {
             var report = GenerateReport(Path.Combine(TestDataDir, name + ".bin"));
@@ -52,6 +53,7 @@ namespace MissionPlanner.Utilities.Tests
         [InlineData("copter")]
         [InlineData("plane")]
         [InlineData("rover")]
+        [InlineData("copter-isbd")]
         public void CorpusLogMatchesGoldenWithNativeScan(string name)
         {
             var old = DFLogBuffer.UseNativeScan;

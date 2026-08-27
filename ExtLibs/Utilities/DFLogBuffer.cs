@@ -86,6 +86,35 @@ namespace MissionPlanner.Utilities
             }
         }
 
+        /// <summary>
+        /// Typed fast path for `a` (int16[32]) array fields (ISBD batch
+        /// samples and friends): decode every record of
+        /// <paramref name="type"/> into one short[32] per row. Values are the
+        /// raw int16 samples exactly as BinaryLog.UnionArray carries them;
+        /// linenos are the same line numbers DFItem.lineno reports. Returns
+        /// false when the native library is unavailable or the field is not
+        /// an `a` array - callers must fall back to the enumerator path.
+        /// </summary>
+        public bool TryGetArrayColumnNative(string type, string field, out long[] linenos, out short[][] rows)
+        {
+            linenos = null;
+            rows = null;
+
+            if (!UseNativeScan || string.IsNullOrEmpty(_filename))
+                return false;
+
+            lock (locker)
+            {
+                if (!nativecolumnstried)
+                {
+                    nativecolumnstried = true;
+                    nativecolumns = DFLogNative.ColumnReader.Open(_filename);
+                }
+
+                return nativecolumns != null && nativecolumns.TryGetArrayColumn(type, field, out linenos, out rows);
+            }
+        }
+
         long indexcachelineno = -1;
         String currentindexcache = null;
 
