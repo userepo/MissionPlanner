@@ -31,6 +31,9 @@ namespace MissionPlanner.Controls
         public new static void Close()
         {
             log.Info("Loading.Close()");
+            // no main form (embedded/headless use of a child form): no splash was shown
+            if (MainV2.instance == null)
+                return;
             lock (locker)
             {
                 if (Instance != null)
@@ -70,6 +73,9 @@ namespace MissionPlanner.Controls
         public static void ShowLoading(string Text, IWin32Window owner = null)
         {
             log.Info(Text);
+            // no main form (embedded/headless use of a child form): skip the splash
+            if (MainV2.instance == null)
+                return;
             // create form on ui thread
             MainV2.instance.BeginInvokeIfRequired((Action)delegate
            {
