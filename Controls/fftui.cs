@@ -494,6 +494,8 @@ namespace MissionPlanner.Controls
                 int second = DateTime.Now.Second;
                 long linesdone = 0;
 
+                // typed fast path (docs/dflog-rust-core-plan.md phase B)
+                if (!BatchLogCollectors.TryCollectAccGyrNative(file, alldata))
                 foreach (var item in file.GetEnumeratorType(new string[]
                              { "ACC1", "GYR1", "ACC2", "GYR2", "ACC3", "GYR3", "ACC4", "GYR4" }))
                 {
@@ -926,6 +928,8 @@ namespace MissionPlanner.Controls
 
                 int offsetX = 0, offsetY = 0, offsetZ = 0, offsetTime = 0;
 
+                // typed fast path (docs/dflog-rust-core-plan.md phase B)
+                if (!BatchLogCollectors.TryCollectIsbhNative(file, alldata))
                 foreach (var item in file.GetEnumeratorType(new string[] { "ISBH", "ISBD" }))
                 {
                     if (item.msgtype == null)
