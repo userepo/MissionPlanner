@@ -223,6 +223,9 @@ namespace MissionPlanner.Controls
                 double[] freqt = null;
                 double samplerate = 0;
 
+                // typed fast path (docs/dflog-rust-core-plan.md phase B)
+                if (!TryAcc1Gyr1Native(file, fft, bins, N, datas, avg,
+                        ref samplecounta, ref samplecountg, ref lasttime, ref timedelta))
                 foreach (var item in file.GetEnumeratorType(new string[] { "ACC1", "GYR1" }))
                 {
                     if (item.msgtype == "ACC1" || item.msgtype == "ACC" && item.instance == "0")
@@ -353,6 +356,107 @@ namespace MissionPlanner.Controls
         }
 
 
+
+        /// <summary>
+        /// Typed fast path for acc1gyr1: pulls whole ACC/GYR columns via
+        /// DFLogBuffer.TryGetColumnsNative and replays the legacy windowing
+        /// state machine over the two streams merged by line number, so the
+        /// FFT windows are built from exactly the same samples. Returns false
+        /// (caller runs the legacy enumerator loop) when the native path is
+        /// off/unavailable or the expected types are missing.
+        /// </summary>
+        bool TryAcc1Gyr1Native(DFLogBuffer file, FFT2 fft, int bins, int N, object[] datas, List<double[]> avg,
+            ref int samplecounta, ref int samplecountg, ref double lasttime, ref double timedelta)
+        {
+            string ResolveType(string legacy, string modern) =>
+                file.dflog.logformat.ContainsKey(legacy) ? legacy :
+                file.dflog.logformat.ContainsKey(modern) ? modern : null;
+
+            var accType = ResolveType("ACC1", "ACC");
+            var gyrType = ResolveType("GYR1", "GYR");
+            if (accType == null || gyrType == null)
+                return false;
+
+            string[] FieldsFor(string type, string x, string y, string z, out bool instanced)
+            {
+                var instanceField = file.GetInstanceFieldName(type);
+                instanced = instanceField != null;
+                return instanced
+                    ? new[] { "TimeUS", x, y, z, instanceField }
+                    : new[] { "TimeUS", x, y, z };
+            }
+
+            var accFields = FieldsFor(accType, "AccX", "AccY", "AccZ", out var accInstanced);
+            var gyrFields = FieldsFor(gyrType, "GyrX", "GyrY", "GyrZ", out var gyrInstanced);
+
+            if (!file.TryGetColumnsNative(accType, accFields, out var accLines, out var acc) ||
+                !file.TryGetColumnsNative(gyrType, gyrFields, out var gyrLines, out var gyr))
+                return false;
+
+            var datainGX = (double[])datas[0];
+            var datainGY = (double[])datas[1];
+            var datainGZ = (double[])datas[2];
+            var datainAX = (double[])datas[3];
+            var datainAY = (double[])datas[4];
+            var datainAZ = (double[])datas[5];
+
+            int ai = 0, gi = 0;
+            while (ai < accLines.Length || gi < gyrLines.Length)
+            {
+                var takeAcc = gi >= gyrLines.Length || (ai < accLines.Length && accLines[ai] <= gyrLines[gi]);
+                if (takeAcc)
+                {
+                    if (!accInstanced || acc[4][ai] == 0)
+                    {
+                        var time = acc[0][ai] / 1000.0;
+                        timedelta = timedelta * 0.99 + (time - lasttime) * 0.01;
+
+                        if (samplecounta < N)
+                        {
+                            datainAX[samplecounta] = acc[1][ai];
+                            datainAY[samplecounta] = acc[2][ai];
+                            datainAZ[samplecounta] = acc[3][ai];
+                            samplecounta++;
+                            lasttime = time;
+                        }
+                    }
+
+                    ai++;
+                }
+                else
+                {
+                    if ((!gyrInstanced || gyr[4][gi] == 0) && samplecountg < N)
+                    {
+                        datainGX[samplecountg] = gyr[1][gi];
+                        datainGY[samplecountg] = gyr[2][gi];
+                        datainGZ[samplecountg] = gyr[3][gi];
+                        samplecountg++;
+                    }
+
+                    gi++;
+                }
+
+                if (samplecounta >= N && samplecountg >= N)
+                {
+                    var inputdataindex = 0;
+                    foreach (var itemlist in datas)
+                    {
+                        var fftanswer = fft.rin((double[])itemlist, (uint)bins, indB);
+
+                        for (var b = 0; b < N / 2; b++)
+                        {
+                            avg[inputdataindex][b] += fftanswer[b] * (1.0 / (N / 2.0));
+                        }
+
+                        samplecounta = 0;
+                        samplecountg = 0;
+                        inputdataindex++;
+                    }
+                }
+            }
+
+            return true;
+        }
 
         private void BUT_accgyrall_Click(object sender, EventArgs e)
         {

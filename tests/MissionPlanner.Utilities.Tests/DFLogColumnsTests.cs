@@ -90,6 +90,47 @@ namespace MissionPlanner.Utilities.Tests
             }
         }
 
+        /// <summary>
+        /// The pattern the converted consumers use for instanced types: fetch
+        /// the value column plus the instance column and filter client-side.
+        /// Must select exactly the rows GetEnumeratorType("TYPE[n]") yields.
+        /// </summary>
+        [Fact]
+        public void InstanceFilteredColumnsMatchEnumerator()
+        {
+            var old = DFLogBuffer.UseNativeScan;
+            DFLogBuffer.UseNativeScan = true;
+            try
+            {
+                using (var buffer = new DFLogBuffer(Path.Combine(TestDataDir, "copter.bin")))
+                {
+                    var instanceField = buffer.GetInstanceFieldName("IMU");
+                    Assert.NotNull(instanceField);
+
+                    var ok = buffer.TryGetColumnsNative("IMU", new[] { "GyrX", instanceField },
+                        out var linenos, out var columns);
+                    Assert.True(ok);
+
+                    var nativeRows = new List<(long lineno, double value)>();
+                    for (var i = 0; i < linenos.Length; i++)
+                        if (columns[1][i] == 0)
+                            nativeRows.Add((linenos[i], columns[0][i]));
+
+                    var col = buffer.dflog.FindMessageOffset("IMU", "GyrX");
+                    var managedRows = new List<(long lineno, double value)>();
+                    foreach (var item in buffer.GetEnumeratorType("IMU[0]"))
+                        managedRows.Add((item.lineno,
+                            Convert.ToDouble(item.raw[col], CultureInfo.InvariantCulture)));
+
+                    Assert.Equal(managedRows, nativeRows);
+                }
+            }
+            finally
+            {
+                DFLogBuffer.UseNativeScan = old;
+            }
+        }
+
         [Fact]
         public void UnknownFieldFailsCleanly()
         {

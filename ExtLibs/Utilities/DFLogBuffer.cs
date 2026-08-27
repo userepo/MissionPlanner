@@ -895,6 +895,27 @@ namespace MissionPlanner.Utilities
             return new Tuple<string, double>(answer.First().Item3, answer.First().Item4);
         }
 
+        /// <summary>
+        /// Label name of the instance column for <paramref name="type"/>
+        /// (e.g. "I" for IMU), or null when the type has no instance column.
+        /// </summary>
+        public string GetInstanceFieldName(string type)
+        {
+            if (!dflog.logformat.ContainsKey(type))
+                return null;
+
+            var typeid = dflog.logformat[type].Id;
+            if (!InstanceType.ContainsKey(typeid) || !FMT.ContainsKey(typeid))
+                return null;
+
+            var labels = FMT[typeid].columns.Split(',');
+            var index = InstanceType[typeid].index;
+            if (index < 0 || index >= labels.Length)
+                return null;
+
+            return labels[index].Trim();
+        }
+
         public int getInstanceIndex(string type)
         {
             if (!dflog.logformat.ContainsKey(type))

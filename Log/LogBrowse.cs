@@ -1497,6 +1497,10 @@ main()
                 return;
             }
 
+            // typed fast path (docs/dflog-rust-core-plan.md phase B)
+            if (GraphItem_GetListNative(fieldname, type, dataModifier, left, instance, extra_label))
+                return;
+
             PointPairList list1 = new PointPairList();
 
             int error = 0;
@@ -1523,30 +1527,7 @@ main()
                         double value = double.Parse(item.items[col],
                             System.Globalization.CultureInfo.InvariantCulture);
 
-                        if (dataModifier.IsValid())
-                        {
-                            if (dataModifier.isMask)
-                            {
-                                int shift;
-                                for (shift = 0; shift < 32; shift++)
-                                { 
-                                    if (((dataModifier.mask >> shift) & 1) != 0) {
-                                        break;
-                                    }
-                                }
-                                value = ((uint)value & dataModifier.mask) >> shift;
-                            }
-                            else if (dataModifier.doOffsetFirst)
-                            {
-                                value += dataModifier.offset;
-                                value *= dataModifier.scalar;
-                            }
-                            else
-                            {
-                                value *= dataModifier.scalar;
-                                value += dataModifier.offset;
-                            }
-                        }
+                        value = ApplyDataModifier(value, dataModifier);
 
                         if (chk_time.Checked)
                         {
@@ -1575,6 +1556,85 @@ main()
             }
 
             Invoke((Action)delegate { GraphItem_AddCurve(list1, type, fieldname, left, instance, false, extra_label); });
+        }
+
+        static double ApplyDataModifier(double value, DataModifer dataModifier)
+        {
+            if (!dataModifier.IsValid())
+                return value;
+
+            if (dataModifier.isMask)
+            {
+                int shift;
+                for (shift = 0; shift < 32; shift++)
+                {
+                    if (((dataModifier.mask >> shift) & 1) != 0)
+                    {
+                        break;
+                    }
+                }
+
+                return ((uint)value & dataModifier.mask) >> shift;
+            }
+
+            if (dataModifier.doOffsetFirst)
+                return (value + dataModifier.offset) * dataModifier.scalar;
+
+            return value * dataModifier.scalar + dataModifier.offset;
+        }
+
+        /// <summary>
+        /// Typed fast path for GraphItem_GetList: pulls the whole column via
+        /// DFLogBuffer.TryGetColumnsNative instead of per-row string parsing.
+        /// Returns false (caller runs the legacy loop) when the native path is
+        /// off/unavailable, the time x-axis is requested, or the instance
+        /// column cannot be resolved. Values are the raw decoded values - not
+        /// rounded through 7-significant-digit strings like the legacy path.
+        /// </summary>
+        bool GraphItem_GetListNative(string fieldname, string type, DataModifer dataModifier, bool left,
+            string instance, string extra_label)
+        {
+            // the time axis needs the per-item gps time correction - legacy path for now
+            if (chk_time.Checked)
+                return false;
+
+            string[] fields;
+            double instanceValue = 0;
+            var hasInstance = instance != "";
+            if (hasInstance)
+            {
+                if (!double.TryParse(instance, NumberStyles.Any, CultureInfo.InvariantCulture, out instanceValue))
+                    return false;
+
+                var instanceField = logdata.GetInstanceFieldName(type);
+                if (instanceField == null)
+                    return false;
+
+                fields = new[] { fieldname, instanceField };
+            }
+            else
+            {
+                fields = new[] { fieldname };
+            }
+
+            if (!logdata.TryGetColumnsNative(type, fields, out var linenos, out var columns))
+                return false;
+
+            log.Info("GraphItem_GetListNative " + type + " " + fieldname + " rows " + linenos.Length);
+
+            var list1 = new PointPairList();
+            var values = columns[0];
+            var instances = hasInstance ? columns[1] : null;
+            for (var i = 0; i < values.Length; i++)
+            {
+                if (instances != null && instances[i] != instanceValue)
+                    continue;
+
+                list1.Add(linenos[i], ApplyDataModifier(values[i], dataModifier));
+            }
+
+            Invoke((Action)delegate { GraphItem_AddCurve(list1, type, fieldname, left, instance, false, extra_label); });
+            return true;
         }
 
         Color pickColour()

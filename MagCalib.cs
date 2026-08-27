@@ -830,6 +830,8 @@ namespace MissionPlanner
 
             var dflog = logdata.dflog;
 
+            // typed fast path (docs/dflog-rust-core-plan.md phase B)
+            if (!TryMagColumnsNative(logdata, data, data2, data3, ofsDoubles, ofsDoubles2, ofsDoubles3, vertexes))
             foreach (var line in logdata.GetEnumeratorType(new[] { "MAG", "MAG2", "MAG3" }))
             {
                 if (line.msgtype == "MAG" || line.msgtype == "MAG2" || line.msgtype == "MAG3")
@@ -930,6 +932,66 @@ namespace MissionPlanner
             Array.Resize<double>(ref x, 3);
 
             return x;
+        }
+
+        /// <summary>
+        /// Typed fast path for the log-based compass extraction: whole-column
+        /// decode instead of per-row string parsing. Returns false (caller
+        /// runs the legacy enumerator loop) when the native path is off or a
+        /// present MAG type cannot be decoded. On instance-based logs all MAG
+        /// instances land in <paramref name="data"/>, matching the legacy
+        /// loop's msgtype-only branching.
+        /// </summary>
+        private static bool TryMagColumnsNative(DFLogBuffer logdata,
+            List<Tuple<float, float, float>> data, List<Tuple<float, float, float>> data2,
+            List<Tuple<float, float, float>> data3,
+            double[] ofsDoubles, double[] ofsDoubles2, double[] ofsDoubles3,
+            List<PolylineVertex> vertexes)
+        {
+            var fields = new[] { "MagX", "MagY", "MagZ", "OfsX", "OfsY", "OfsZ" };
+            var sets = new[]
+            {
+                ("MAG", data, ofsDoubles),
+                ("MAG2", data2, ofsDoubles2),
+                ("MAG3", data3, ofsDoubles3)
+            };
+
+            foreach (var (msgtype, target, ofs) in sets)
+            {
+                // absent from the log entirely - nothing to extract, like legacy
+                if (!logdata.dflog.logformat.ContainsKey(msgtype))
+                    continue;
+
+                if (!logdata.TryGetColumnsNative(msgtype, fields, out _, out var cols))
+                    return false;
+
+                var rows = cols[0].Length;
+                for (var i = 0; i < rows; i++)
+                {
+                    var magx = (float)cols[0][i];
+                    var magy = (float)cols[1][i];
+                    var magz = (float)cols[2][i];
+                    var offsetx = (float)cols[3][i];
+                    var offsety = (float)cols[4][i];
+                    var offsetz = (float)cols[5][i];
+
+                    target.Add(new Tuple<float, float, float>(
+                        magx - offsetx, magy - offsety, magz - offsetz));
+
+                    if (msgtype == "MAG")
+                        vertexes.Add(new PolylineVertex(new netDxf.Vector3(
+                            magx - offsetx, magy - offsety, magz - offsetz)));
+                }
+
+                if (rows > 0)
+                {
+                    ofs[0] = cols[3][rows - 1];
+                    ofs[1] = cols[4][rows - 1];
+                    ofs[2] = cols[5][rows - 1];
+                }
+            }
+
+            return true;
         }
 
         /// <summary>
