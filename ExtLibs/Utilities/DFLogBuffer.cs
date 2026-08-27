@@ -81,6 +81,10 @@ namespace MissionPlanner.Utilities
         /// <summary>Whether the last setlinecount used the native scanner.</summary>
         internal static bool LastScanNative;
 
+        /// <summary>Whether the last setlinecount loaded the BinaryFormatter
+        /// index cache instead of scanning.</summary>
+        internal static bool LastLoadFromCache;
+
         DFLogNative.ColumnReader nativeColumns;
         bool nativeColumnsTried;
 
@@ -206,6 +210,7 @@ namespace MissionPlanner.Utilities
             var nativeCapable = binary && UseNativeScan &&
                                 !string.IsNullOrEmpty(_filename) && DFLogNative.Available;
             LastScanNative = false;
+            LastLoadFromCache = false;
 
             if (string.IsNullOrEmpty(_filename) || nativeCapable || !LoadCache())
             {
@@ -539,6 +544,7 @@ namespace MissionPlanner.Utilities
 
                 // build fmt line database to pre seed the FMT message
                 messageindexline[128].ForEach(a => dflog.FMTLine(this[(int)a]));
+                LastLoadFromCache = true;
                 return true;
             }
 
