@@ -20,11 +20,14 @@
 //! - An FMT payload truncated by end-of-file is zero-padded, as the C# side's
 //!   partial `Stream.Read` into a zeroed array does.
 
+use std::collections::HashMap;
 use std::fs::File;
 use std::io;
 use std::path::Path;
 
 use memmap2::Mmap;
+
+pub mod columns;
 
 pub const HEAD_BYTE1: u8 = 0xA3;
 pub const HEAD_BYTE2: u8 = 0x95;
@@ -39,6 +42,85 @@ pub struct LogIndex {
     pub offsets: Vec<u64>,
     /// Message type byte of each record, parallel to `offsets`.
     pub types: Vec<u8>,
+}
+
+/// One FMT definition as the scanner saw it (last definition wins per name,
+/// matching the C# dictionaries).
+#[derive(Debug, Clone)]
+pub struct FmtDef {
+    pub id: u8,
+    /// full record length including the 3 header bytes
+    pub length: usize,
+    pub name: String,
+    pub format: String,
+    pub labels: Vec<String>,
+}
+
+fn ascii_trim_nul(bytes: &[u8]) -> String {
+    let text: String = bytes.iter().map(|&b| b as char).collect();
+    text.trim_matches('\0').to_string()
+}
+
+/// A scanned log kept open for typed column queries.
+pub struct LogFile {
+    map: Mmap,
+    pub index: LogIndex,
+    /// FMT definitions by message type id, last definition per id winning.
+    pub fmts: HashMap<u8, FmtDef>,
+    /// message name -> type id, last FMT per name winning (C# logformat)
+    pub name_to_id: HashMap<String, u8>,
+}
+
+impl LogFile {
+    pub fn open(path: &Path) -> io::Result<LogFile> {
+        let file = File::open(path)?;
+        // mmap of an empty file fails; give it one anonymous zero byte
+        let map = if file.metadata()?.len() == 0 {
+            memmap2::MmapMut::map_anon(1)?.make_read_only()?
+        } else {
+            // SAFETY: read-only mapping, same caveats as scan_file
+            unsafe { Mmap::map(&file)? }
+        };
+        let len = file.metadata()?.len() as usize;
+        let index = scan(&map[..len]);
+
+        // re-read the FMT payloads the scan indexed (type 0x80 records)
+        let mut fmts = HashMap::new();
+        let mut name_to_id = HashMap::new();
+        let data = &map[..len];
+        for (i, &t) in index.types.iter().enumerate() {
+            if t != FMT_TYPE {
+                continue;
+            }
+            let start = index.offsets[i] as usize + 3;
+            let take = FMT_PAYLOAD_LEN.min(data.len().saturating_sub(start));
+            let mut payload = [0u8; FMT_PAYLOAD_LEN];
+            payload[..take].copy_from_slice(&data[start..start + take]);
+            let def = FmtDef {
+                id: payload[0],
+                length: payload[1] as usize,
+                name: ascii_trim_nul(&payload[2..6]),
+                format: ascii_trim_nul(&payload[6..22]),
+                labels: ascii_trim_nul(&payload[22..86])
+                    .split(',')
+                    .map(|s| s.trim().to_string())
+                    .collect(),
+            };
+            name_to_id.insert(def.name.clone(), def.id);
+            fmts.insert(def.id, def);
+        }
+
+        Ok(LogFile {
+            map,
+            index,
+            fmts,
+            name_to_id,
+        })
+    }
+
+    pub fn data(&self) -> &[u8] {
+        &self.map
+    }
 }
 
 impl LogIndex {

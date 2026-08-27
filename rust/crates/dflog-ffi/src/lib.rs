@@ -22,7 +22,9 @@ pub const DFLOG_ERR_IO: i32 = -2;
 pub const DFLOG_ERR_PANIC: i32 = -3;
 
 /// Bumped when the ABI changes shape; checked by the C# side.
-pub const DFLOG_ABI_VERSION: u32 = 1;
+pub const DFLOG_ABI_VERSION: u32 = 2;
+
+pub const DFLOG_ERR_QUERY: i32 = -4;
 
 thread_local! {
     static LAST_ERROR: RefCell<String> = RefCell::new(String::new());
@@ -105,6 +107,142 @@ pub unsafe extern "C" fn dflog_scan_file(path_utf8: *const c_char, out: *mut *mu
 pub unsafe extern "C" fn dflog_index_free(index: *mut DflogIndex) {
     if !index.is_null() {
         drop(Box::from_raw(index));
+    }
+}
+
+/// An open log kept resident for typed column queries (phase B).
+pub struct DflogFile {
+    log: dflog_core::LogFile,
+}
+
+/// Column-major query result: `values[col * rows + row]`.
+#[repr(C)]
+pub struct DflogColumns {
+    pub rows: u64,
+    pub cols: u32,
+    pub linenos: *const u64,
+    pub values: *const f64,
+    // rust-owned storage; opaque to the C side beyond `values`
+    linenos_vec: Vec<u64>,
+    values_vec: Vec<f64>,
+}
+
+/// Open the log at `path_utf8` for column queries; release with `dflog_close`.
+///
+/// # Safety
+/// `path_utf8` must be a valid NUL-terminated UTF-8 string and `out` a valid
+/// pointer to receive the handle.
+#[no_mangle]
+pub unsafe extern "C" fn dflog_open(path_utf8: *const c_char, out: *mut *mut DflogFile) -> i32 {
+    if path_utf8.is_null() || out.is_null() {
+        set_last_error("null argument".into());
+        return DFLOG_ERR_BAD_ARGUMENT;
+    }
+    *out = ptr::null_mut();
+
+    let path = match CStr::from_ptr(path_utf8).to_str() {
+        Ok(s) => PathBuf::from(s),
+        Err(_) => {
+            set_last_error("path is not valid UTF-8".into());
+            return DFLOG_ERR_BAD_ARGUMENT;
+        }
+    };
+
+    match catch_unwind(AssertUnwindSafe(|| dflog_core::LogFile::open(&path))) {
+        Ok(Ok(log)) => {
+            *out = Box::into_raw(Box::new(DflogFile { log }));
+            DFLOG_OK
+        }
+        Ok(Err(err)) => {
+            set_last_error(format!("{}: {}", path.display(), err));
+            DFLOG_ERR_IO
+        }
+        Err(_) => {
+            set_last_error("panic in dflog_open".into());
+            DFLOG_ERR_PANIC
+        }
+    }
+}
+
+/// Release a handle returned by `dflog_open`.
+///
+/// # Safety
+/// `file` must come from `dflog_open` and not be used afterwards. Null is
+/// ignored.
+#[no_mangle]
+pub unsafe extern "C" fn dflog_close(file: *mut DflogFile) {
+    if !file.is_null() {
+        drop(Box::from_raw(file));
+    }
+}
+
+/// Decode the comma-separated `fields_utf8` of every `type_utf8` record into
+/// f64 columns. Release the result with `dflog_columns_free`.
+///
+/// # Safety
+/// `file` must be a live `dflog_open` handle; the strings must be valid
+/// NUL-terminated UTF-8; `out` must be a valid pointer.
+#[no_mangle]
+pub unsafe extern "C" fn dflog_get_columns(
+    file: *const DflogFile,
+    type_utf8: *const c_char,
+    fields_utf8: *const c_char,
+    out: *mut *mut DflogColumns,
+) -> i32 {
+    if file.is_null() || type_utf8.is_null() || fields_utf8.is_null() || out.is_null() {
+        set_last_error("null argument".into());
+        return DFLOG_ERR_BAD_ARGUMENT;
+    }
+    *out = ptr::null_mut();
+
+    let (type_name, fields_csv) = match (CStr::from_ptr(type_utf8).to_str(), CStr::from_ptr(fields_utf8).to_str()) {
+        (Ok(t), Ok(f)) => (t, f),
+        _ => {
+            set_last_error("type/fields are not valid UTF-8".into());
+            return DFLOG_ERR_BAD_ARGUMENT;
+        }
+    };
+
+    let fields: Vec<&str> = fields_csv.split(',').collect();
+    let log = &(*file).log;
+
+    match catch_unwind(AssertUnwindSafe(|| {
+        dflog_core::columns::get_columns(log, type_name, &fields)
+    })) {
+        Ok(Ok(cols)) => {
+            let mut boxed = Box::new(DflogColumns {
+                rows: cols.rows,
+                cols: cols.cols,
+                linenos: ptr::null(),
+                values: ptr::null(),
+                linenos_vec: cols.linenos,
+                values_vec: cols.values,
+            });
+            boxed.linenos = boxed.linenos_vec.as_ptr();
+            boxed.values = boxed.values_vec.as_ptr();
+            *out = Box::into_raw(boxed);
+            DFLOG_OK
+        }
+        Ok(Err(err)) => {
+            set_last_error(err.to_string());
+            DFLOG_ERR_QUERY
+        }
+        Err(_) => {
+            set_last_error("panic in dflog_get_columns".into());
+            DFLOG_ERR_PANIC
+        }
+    }
+}
+
+/// Release a result returned by `dflog_get_columns`.
+///
+/// # Safety
+/// `columns` must come from `dflog_get_columns` and not be used afterwards.
+/// Null is ignored.
+#[no_mangle]
+pub unsafe extern "C" fn dflog_columns_free(columns: *mut DflogColumns) {
+    if !columns.is_null() {
+        drop(Box::from_raw(columns));
     }
 }
 

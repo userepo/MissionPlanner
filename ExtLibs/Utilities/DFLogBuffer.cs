@@ -50,7 +50,41 @@ namespace MissionPlanner.Utilities
         /// <summary>Whether the last setlinecount used the native scanner.</summary>
         internal static bool LastScanNative;
 
+        DFLogNative.ColumnReader nativecolumns;
+        bool nativecolumnstried;
+
         object locker = new object();
+
+        /// <summary>
+        /// Typed fast path (phase B, docs/dflog-rust-core-plan.md): decode all
+        /// records of <paramref name="type"/> straight from the file into one
+        /// double column per field, bypassing the per-row string conversion.
+        /// Row order matches GetEnumeratorType(type); linenos are the same
+        /// line numbers DFItem.lineno reports. Returns false when the native
+        /// library is unavailable or the type/field cannot be decoded
+        /// numerically - callers must fall back to the enumerator path.
+        /// Note: values are the raw decoded values; the legacy string path
+        /// rounds floats to 7 significant digits, this path does not.
+        /// </summary>
+        public bool TryGetColumnsNative(string type, string[] fields, out long[] linenos, out double[][] columns)
+        {
+            linenos = null;
+            columns = null;
+
+            if (!UseNativeScan || string.IsNullOrEmpty(_filename))
+                return false;
+
+            lock (locker)
+            {
+                if (!nativecolumnstried)
+                {
+                    nativecolumnstried = true;
+                    nativecolumns = DFLogNative.ColumnReader.Open(_filename);
+                }
+
+                return nativecolumns != null && nativecolumns.TryGetColumns(type, fields, out linenos, out columns);
+            }
+        }
 
         long indexcachelineno = -1;
         String currentindexcache = null;
@@ -696,6 +730,8 @@ namespace MissionPlanner.Utilities
             basestream.Dispose();
             _count = 0;
             linestartoffset.Clear();
+            nativecolumns?.Dispose();
+            nativecolumns = null;
         }
 
         public int Count
@@ -823,6 +859,8 @@ namespace MissionPlanner.Utilities
             linestartoffset.Clear();
             linestartoffset = null;
             messageindex = null;
+            nativecolumns?.Dispose();
+            nativecolumns = null;
             GC.Collect();
         }
 
