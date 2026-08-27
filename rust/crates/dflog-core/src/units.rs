@@ -137,7 +137,7 @@ mod tests {
 
     fn corpus(name: &str) -> LogFile {
         let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("../../../tests/MissionPlanner.Utilities.Tests/testdata")
+            .join("../../testdata")
             .join(name);
         LogFile::open(&path).expect("corpus log")
     }

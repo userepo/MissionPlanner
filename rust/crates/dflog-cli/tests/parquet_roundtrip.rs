@@ -18,7 +18,7 @@ use dflog_core::{columns, LogFile};
 
 fn testdata(name: &str) -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("../../../tests/MissionPlanner.Utilities.Tests/testdata")
+        .join("../../testdata")
         .join(name)
 }
 

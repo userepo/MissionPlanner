@@ -17,8 +17,8 @@ TIME="${TIME:-14400}"
 
 for t in scan convert columns; do
     mkdir -p "fuzz/corpus/$t"
-    head -c 8192 ../tests/MissionPlanner.Utilities.Tests/testdata/copter.bin > "fuzz/corpus/$t/seed1"
-    tail -c 8192 ../tests/MissionPlanner.Utilities.Tests/testdata/copter-isbd.bin > "fuzz/corpus/$t/seed2"
+    head -c 8192 testdata/copter.bin > "fuzz/corpus/$t/seed1"
+    tail -c 8192 testdata/copter-isbd.bin > "fuzz/corpus/$t/seed2"
 done
 
 echo "soak: $TIME seconds per target, parallel; logs in ~/dflog-soak-<target>.log"

@@ -10,7 +10,7 @@ import numpy as np
 
 import dflog
 
-CORPUS = Path(__file__).resolve().parents[4] / "tests/MissionPlanner.Utilities.Tests/testdata"
+CORPUS = Path(__file__).resolve().parents[3] / "testdata"
 
 
 def test_open_and_types():

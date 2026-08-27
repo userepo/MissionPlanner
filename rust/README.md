@@ -37,7 +37,7 @@ prefers Linux; run under WSL:
 rustup toolchain install nightly && cargo install cargo-fuzz
 cd rust
 mkdir -p fuzz/corpus/scan
-head -c 8192 ../tests/MissionPlanner.Utilities.Tests/testdata/copter.bin > fuzz/corpus/scan/seed
+head -c 8192 testdata/copter.bin > fuzz/corpus/scan/seed
 cargo +nightly fuzz run scan -- -max_total_time=300 -max_len=65536
 ```
 

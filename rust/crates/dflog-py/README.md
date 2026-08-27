@@ -38,7 +38,7 @@ run-tests.bat
 
 It builds the abi3 cdylib with cargo, stages it as `dflog.pyd` on
 `sys.path`, and runs `tests/test_dflog.py` against the SITL corpus in
-`tests/MissionPlanner.Utilities.Tests/testdata`.
+`rust/testdata`.
 
 Wheels are built with [maturin](https://github.com/PyO3/maturin) from this
 directory (`maturin build --release`); the abi3-py39 target produces one

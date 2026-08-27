@@ -112,7 +112,7 @@ fn exercise(data: &[u8]) {
 
 fn seeds() -> Vec<Vec<u8>> {
     let corpus = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("../../../tests/MissionPlanner.Utilities.Tests/testdata/copter.bin");
+        .join("../../testdata/copter.bin");
     let copter = std::fs::read(&corpus).expect("corpus copter.bin");
 
     vec![
