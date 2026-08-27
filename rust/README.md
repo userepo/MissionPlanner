@@ -14,6 +14,10 @@ Current members (see docs/dflog-rust-core-plan.md):
 - `crates/dflog-ffi` - `cdylib` C ABI consumed by
   `ExtLibs/Utilities/DFLogNative.cs` over P/Invoke. Panics never cross the
   boundary; errors are codes plus a per-thread `dflog_last_error` message.
+- `crates/dflog-cli` - the standalone `dflog` binary: `info` (record/type
+  summary), `dump` (numeric columns as CSV), `convert` (text conversion,
+  byte-compatible with Mission Planner's BinaryLog.ConvertBin run headless;
+  verified against the corpus by tests/MissionPlanner.Utilities.Tests).
 
 Build:
 

@@ -20,5 +20,8 @@
     <None Include="..\..\rust\target\release\dflog_ffi.dll"
           Condition="Exists('..\..\rust\target\release\dflog_ffi.dll')"
           CopyToOutputDirectory="PreserveNewest" />
+    <None Include="..\..\rust\target\release\dflog.exe"
+          Condition="Exists('..\..\rust\target\release\dflog.exe')"
+          CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 </Project>

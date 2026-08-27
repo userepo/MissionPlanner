@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/dflog-core", "crates/dflog-ffi"]
+members = ["crates/dflog-core", "crates/dflog-ffi", "crates/dflog-cli"]
 
 [workspace.package]
 edition = "2021"

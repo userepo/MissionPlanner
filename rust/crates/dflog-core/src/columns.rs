@@ -70,7 +70,7 @@ fn field_size(code: char) -> Option<usize> {
     })
 }
 
-fn half_to_f32(bits: u16) -> f32 {
+pub(crate) fn half_to_f32(bits: u16) -> f32 {
     // IEEE 754 binary16 -> binary32
     let sign = ((bits >> 15) & 1) as u32;
     let exp = ((bits >> 10) & 0x1F) as u32;
