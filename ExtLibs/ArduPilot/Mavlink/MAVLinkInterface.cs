@@ -5979,7 +5979,7 @@ Mission Planner waits for 2 valid heartbeat packets before connecting
             var filename = Path.GetTempFileName();
 
             ConcurrentQueue<MAVLinkMessage> queue = new ConcurrentQueue<MAVLinkMessage>();
-            SemaphoreSlim queuesignal = new SemaphoreSlim(0);
+            SemaphoreSlim queueSignal = new SemaphoreSlim(0);
             EventHandler<MAVLinkMessage> handler = (sender, msg) =>
             {
                 if (msg.msgid == (byte) MAVLINK_MSG_ID.LOG_DATA)
@@ -5987,7 +5987,7 @@ Mission Planner waits for 2 valid heartbeat packets before connecting
                     queue.Enqueue(msg);
                     try
                     {
-                        queuesignal.Release();
+                        queueSignal.Release();
                     }
                     catch (ObjectDisposedException)
                     {
@@ -6001,9 +6001,9 @@ Mission Planner waits for 2 valid heartbeat packets before connecting
             {
                 using (FileStream ms = new FileStream(filename, FileMode.Create, FileAccess.ReadWrite))
                 {
-                    // received 90-byte block numbers; every block below lowestmissing is known received
+                    // received 90-byte block numbers; every block below lowestMissing is known received
                     HashSet<uint> set = new HashSet<uint>();
-                    uint lowestmissing = 0;
+                    uint lowestMissing = 0;
 
                     giveComport = false;
                     MAVLinkMessage buffer = MAVLinkMessage.Invalid;
@@ -6014,7 +6014,7 @@ Mission Planner waits for 2 valid heartbeat packets before connecting
                     }
 
                     uint totallength = 0;
-                    uint maxend = 0;
+                    uint maxEnd = 0;
                     uint ofs = 0;
                     uint bps = 0;
                     DateTime bpstimer = DateTime.Now;
@@ -6031,21 +6031,18 @@ Mission Planner waits for 2 valid heartbeat packets before connecting
                     // request point
                     generatePacket((byte) MAVLINK_MSG_ID.LOG_REQUEST_DATA, req);
 
-                    DateTime start = DateTime.Now;
                     int retrys = 3;
-
 
                     while (true)
                     {
-                        cancel.ThrowIfCancellationRequested();
-
-                        if (!(start.AddMilliseconds(3000) > DateTime.Now))
+                        // park until the handler queues a LOG_DATA packet
+                        // false means 3s of silence - resend the request
+                        if (!await queueSignal.WaitAsync(3000, cancel).ConfigureAwait(false))
                         {
                             if (retrys > 0)
                             {
                                 log.Info("GetLog Retry " + retrys + " - giv com " + giveComport);
                                 generatePacket((byte) MAVLINK_MSG_ID.LOG_REQUEST_DATA, req);
-                                start = DateTime.Now;
                                 retrys--;
                                 continue;
                             }
@@ -6055,11 +6052,7 @@ Mission Planner waits for 2 valid heartbeat packets before connecting
                         }
 
                         if (!queue.TryDequeue(out buffer))
-                        {
-                            // wait for the next LOG_DATA packet instead of polling
-                            await queuesignal.WaitAsync(100, cancel).ConfigureAwait(false);
                             continue;
-                        }
 
                         if (buffer.Length > 5)
                         {
@@ -6073,15 +6066,14 @@ Mission Planner waits for 2 valid heartbeat packets before connecting
 
                                 // reset retrys
                                 retrys = 3;
-                                start = DateTime.Now;
 
                                 bps += data.count;
 
                                 // record what we have received
                                 set.Add(data.ofs / 90);
-                                while (set.Contains(lowestmissing))
-                                    lowestmissing++;
-                                maxend = Math.Max(maxend, data.ofs + data.count);
+                                while (set.Contains(lowestMissing))
+                                    lowestMissing++;
+                                maxEnd = Math.Max(maxEnd, data.ofs + data.count);
 
                                 if (ms.Position != data.ofs)
                                     ms.Seek((long) data.ofs, SeekOrigin.Begin);
@@ -6104,9 +6096,9 @@ Mission Planner waits for 2 valid heartbeat packets before connecting
 
                                 // a short or empty packet ends the log, but only trust it at the highest
                                 // offset seen - a reordered short packet must not truncate the download
-                                if (data.count < 90 && data.ofs + data.count >= maxend)
+                                if (data.count < 90 && data.ofs + data.count >= maxEnd)
                                 {
-                                    totallength = maxend;
+                                    totallength = maxEnd;
                                     log.Info("start fillin len " + totallength + " count " + set.Count + " datalen " +
                                              data.count);
                                     break;
@@ -6115,52 +6107,54 @@ Mission Planner waits for 2 valid heartbeat packets before connecting
                         }
                     }
 
-                    // blocks 0..totalblocks-1 must all be present before the download is complete
-                    uint totalblocks = (totallength + 89) / 90;
+                    // blocks 0..totalBlocks-1 must all be present before the download is complete
+                    uint totalBlocks = (totallength + 89) / 90;
 
                     log.Info("set count " + set.Count);
-                    log.Info("count total " + totalblocks);
+                    log.Info("count total " + totalBlocks);
                     log.Info("totallength " + totallength);
                     log.Info("current length " + ms.Length);
 
+                    // request the first run of still-missing blocks
+                    void RequestFirstMissing()
+                    {
+                        if (lowestMissing >= totalBlocks)
+                            return;
+
+                        // request large chunk if they are back to back
+                        uint bytereq = 90;
+                        uint b = lowestMissing + 1;
+                        while (b < totalBlocks && !set.Contains(b))
+                        {
+                            bytereq += 90;
+                            b++;
+                        }
+
+                        req.ofs = lowestMissing * 90;
+                        req.count = bytereq;
+                        log.Info("req missing " + req.ofs + " bytes " + req.count + " got " + set.Count + "/" +
+                                 totalBlocks);
+                        generatePacket((byte) MAVLINK_MSG_ID.LOG_REQUEST_DATA, req);
+                    }
+
                     while ((BaseStream != null && BaseStream.IsOpen) || logreadmode)
                     {
-                        cancel.ThrowIfCancellationRequested();
-
-                        if (ms.Length >= totallength && lowestmissing >= totalblocks)
+                        if (ms.Length >= totallength && lowestMissing >= totalBlocks)
                         {
                             giveComport = false;
                             return filename;
                         }
 
-                        if (!(start.AddMilliseconds(500) > DateTime.Now))
+                        // park until more data arrives; 500ms of silence means the
+                        // current request ran dry - ask for what is still missing
+                        if (!await queueSignal.WaitAsync(500, cancel).ConfigureAwait(false))
                         {
-                            if (lowestmissing < totalblocks)
-                            {
-                                // request large chunk if they are back to back
-                                uint bytereq = 90;
-                                uint b = lowestmissing + 1;
-                                while (b < totalblocks && !set.Contains(b))
-                                {
-                                    bytereq += 90;
-                                    b++;
-                                }
-
-                                req.ofs = lowestmissing * 90;
-                                req.count = bytereq;
-                                log.Info("req missing " + req.ofs + " bytes " + req.count + " got " + set.Count + "/" +
-                                         totalblocks);
-                                generatePacket((byte) MAVLINK_MSG_ID.LOG_REQUEST_DATA, req);
-                                start = DateTime.Now;
-                            }
+                            RequestFirstMissing();
+                            continue;
                         }
 
                         if (!queue.TryDequeue(out buffer))
-                        {
-                            // wait for the next LOG_DATA packet instead of polling
-                            await queuesignal.WaitAsync(100, cancel).ConfigureAwait(false);
                             continue;
-                        }
 
                         if (buffer.Length > 5)
                         {
@@ -6172,16 +6166,12 @@ Mission Planner waits for 2 valid heartbeat packets before connecting
                                 if (data.id != no)
                                     continue;
 
-                                // reset retrys
-                                retrys = 3;
-                                start = DateTime.Now;
-
                                 bps += data.count;
 
                                 // record what we have received
                                 set.Add(data.ofs / 90);
-                                while (set.Contains(lowestmissing))
-                                    lowestmissing++;
+                                while (set.Contains(lowestMissing))
+                                    lowestMissing++;
 
                                 ms.Seek((long) data.ofs, SeekOrigin.Begin);
                                 ms.Write(data.data, 0, data.count);
@@ -6201,11 +6191,11 @@ Mission Planner waits for 2 valid heartbeat packets before connecting
                                     bps = 0;
                                 }
 
-                                // check if we have next set and invalidate to request next packets
+                                // this fill run has caught up to data we already hold -
+                                // request the next missing run now instead of waiting
+                                // out the 500ms silence
                                 if (set.Contains((data.ofs / 90) + 1))
-                                {
-                                    start = DateTime.MinValue;
-                                }
+                                    RequestFirstMissing();
                             }
                         }
                     }
@@ -6229,7 +6219,7 @@ Mission Planner waits for 2 valid heartbeat packets before connecting
             finally
             {
                 OnPacketReceived -= handler;
-                queuesignal.Dispose();
+                queueSignal.Dispose();
             }
         }
 
