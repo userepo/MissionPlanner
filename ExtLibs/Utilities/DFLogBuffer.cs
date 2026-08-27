@@ -39,7 +39,7 @@ namespace MissionPlanner.Utilities
 
         bool binary = false;
 
-        static bool? usenativescan;
+        static bool? useNativeScan;
 
         /// <summary>
         /// Use the Rust log core (rust/crates/dflog-ffi) for binary logs when
@@ -52,11 +52,11 @@ namespace MissionPlanner.Utilities
         {
             get
             {
-                if (usenativescan == null)
-                    usenativescan = DefaultUseNativeScan();
-                return usenativescan.Value;
+                if (useNativeScan == null)
+                    useNativeScan = DefaultUseNativeScan();
+                return useNativeScan.Value;
             }
-            set { usenativescan = value; }
+            set { useNativeScan = value; }
         }
 
         static bool DefaultUseNativeScan()
@@ -81,8 +81,8 @@ namespace MissionPlanner.Utilities
         /// <summary>Whether the last setlinecount used the native scanner.</summary>
         internal static bool LastScanNative;
 
-        DFLogNative.ColumnReader nativecolumns;
-        bool nativecolumnstried;
+        DFLogNative.ColumnReader nativeColumns;
+        bool nativeColumnsTried;
 
         object locker = new object();
 
@@ -107,13 +107,13 @@ namespace MissionPlanner.Utilities
 
             lock (locker)
             {
-                if (!nativecolumnstried)
+                if (!nativeColumnsTried)
                 {
-                    nativecolumnstried = true;
-                    nativecolumns = DFLogNative.ColumnReader.Open(_filename);
+                    nativeColumnsTried = true;
+                    nativeColumns = DFLogNative.ColumnReader.Open(_filename);
                 }
 
-                return nativecolumns != null && nativecolumns.TryGetColumns(type, fields, out linenos, out columns);
+                return nativeColumns != null && nativeColumns.TryGetColumns(type, fields, out linenos, out columns);
             }
         }
 
@@ -136,13 +136,13 @@ namespace MissionPlanner.Utilities
 
             lock (locker)
             {
-                if (!nativecolumnstried)
+                if (!nativeColumnsTried)
                 {
-                    nativecolumnstried = true;
-                    nativecolumns = DFLogNative.ColumnReader.Open(_filename);
+                    nativeColumnsTried = true;
+                    nativeColumns = DFLogNative.ColumnReader.Open(_filename);
                 }
 
-                return nativecolumns != null && nativecolumns.TryGetArrayColumn(type, field, out linenos, out rows);
+                return nativeColumns != null && nativeColumns.TryGetArrayColumn(type, field, out linenos, out rows);
             }
         }
 
@@ -200,7 +200,14 @@ namespace MissionPlanner.Utilities
 
         void setlinecount()
         {
-            if (string.IsNullOrEmpty(_filename) || !LoadCache())
+            // with the native scanner a fresh index is cheap, so skip the
+            // obsolete BinaryFormatter cache in both directions; the managed
+            // fallback keeps using it for >300MB logs
+            var nativeCapable = binary && UseNativeScan &&
+                                !string.IsNullOrEmpty(_filename) && DFLogNative.Available;
+            LastScanNative = false;
+
+            if (string.IsNullOrEmpty(_filename) || nativeCapable || !LoadCache())
             {
                 byte[] buffer = new byte[1024 * 1024];
 
@@ -211,15 +218,15 @@ namespace MissionPlanner.Utilities
 
                     LastScanNative = false;
                     if (UseNativeScan && !string.IsNullOrEmpty(_filename) &&
-                        DFLogNative.TryScan(_filename, out var nativeoffsets, out var nativetypes))
+                        DFLogNative.TryScan(_filename, out var nativeOffsets, out var nativeTypes))
                     {
-                        for (int i = 0; i < nativeoffsets.Length; i++)
+                        for (int i = 0; i < nativeOffsets.Length; i++)
                         {
-                            byte type = nativetypes[i];
-                            messageindex[type].Add(nativeoffsets[i]);
+                            byte type = nativeTypes[i];
+                            messageindex[type].Add(nativeOffsets[i]);
                             messageindexline[type].Add(lineCount);
 
-                            linestartoffset.Add(nativeoffsets[i]);
+                            linestartoffset.Add(nativeOffsets[i]);
                             lineCount++;
                         }
 
@@ -323,7 +330,8 @@ namespace MissionPlanner.Utilities
                     }
                 }
 
-                SaveCache();
+                if (!LastScanNative)
+                    SaveCache();
             }
 
 
@@ -790,8 +798,8 @@ namespace MissionPlanner.Utilities
             basestream.Dispose();
             _count = 0;
             linestartoffset.Clear();
-            nativecolumns?.Dispose();
-            nativecolumns = null;
+            nativeColumns?.Dispose();
+            nativeColumns = null;
         }
 
         public int Count
@@ -919,8 +927,8 @@ namespace MissionPlanner.Utilities
             linestartoffset.Clear();
             linestartoffset = null;
             messageindex = null;
-            nativecolumns?.Dispose();
-            nativecolumns = null;
+            nativeColumns?.Dispose();
+            nativeColumns = null;
             GC.Collect();
         }
 

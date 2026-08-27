@@ -43,6 +43,13 @@ Crashing inputs land in `fuzz/artifacts/<target>/`; distill every finding
 into `crates/dflog-core/tests/fuzz_smoke.rs` as a permanent regression case.
 
 The test csproj copies `dflog_ffi.dll` to its output when present. At
-runtime the native scanner is opt-in via `DFLogBuffer.UseNativeScan`
-(env var `DFLOG_NATIVE=1`); the managed scanner remains the fallback
-whenever the library is missing or a scan fails.
+runtime the native path is controlled by `DFLogBuffer.UseNativeScan`
+(explicit set > `DFLOG_NATIVE` env var > the `dflog_native` setting); the
+managed path remains the fallback whenever the library is missing or a
+call fails.
+
+Packaging: the app ships the checked-in copy at
+`ExtLibs/Utilities/dflog_ffi.dll` (Windows x64; other platforms use the
+managed fallback). After any change under `rust/`, run `update-dll.bat`
+and commit the refreshed DLL - the `CheckedInDllMatchesExpectedAbi` unit
+test fails when the checked-in copy lags the sources' ABI.

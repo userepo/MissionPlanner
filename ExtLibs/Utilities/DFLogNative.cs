@@ -16,7 +16,10 @@ namespace MissionPlanner.Utilities
             LogManager.GetLogger(System.Reflection.MethodBase.GetCurrentMethod().DeclaringType);
 
         const string Dll = "dflog_ffi";
-        const uint AbiVersion = 3;
+
+        /// <summary>the ABI this build expects; the checked-in and freshly
+        /// built libraries must both report it (see rust/update-dll.bat)</summary>
+        internal const uint AbiVersion = 3;
 
         [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)]
         static extern uint dflog_abi_version();
