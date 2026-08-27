@@ -30,7 +30,12 @@ between modes: the native path adds curves synchronously in request order,
 the legacy threadpool path in completion order) and reports the row count,
 the maximum y delta, and the number of differing pixels between the PNGs.
 
-## Reference results (2026-08-26, corpus copter.bin)
+Set `LOGBROWSE_TIMEAXIS=1` to graph with the time x-axis (the GPS-corrected
+XDate values) instead of line numbers.
+
+## Reference results (2026-08-26/27, corpus copter.bin)
+
+Line-number axis and time axis produce the same numbers:
 
 ```
 COMPARE rows=686 maxYdelta=4.997E-009 diffpixels=0 of 1022528

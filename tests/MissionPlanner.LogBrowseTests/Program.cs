@@ -87,10 +87,10 @@ static class Program
                     case 0: // wait for the log to load
                         if (logdataField.GetValue(form) == null)
                             return;
-                        // settle one tick, then force the line-number x axis
+                        // settle one tick, then force the requested x axis
                         var chk = (CheckBox)chkTimeField?.GetValue(form);
                         if (chk != null)
-                            chk.Checked = false;
+                            chk.Checked = Environment.GetEnvironmentVariable("LOGBROWSE_TIMEAXIS") == "1";
                         state = 1;
                         return;
 

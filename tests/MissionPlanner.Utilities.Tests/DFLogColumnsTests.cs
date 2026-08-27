@@ -241,6 +241,39 @@ namespace MissionPlanner.Utilities.Tests
             }
         }
 
+        /// <summary>
+        /// The LogBrowse time-axis computation: TimeUS column / 1000 through
+        /// DFLog.GetTimeFromMs must equal DFItem.time tick for tick.
+        /// </summary>
+        [Fact]
+        public void ColumnwiseTimeMatchesDFItemTime()
+        {
+            var old = DFLogBuffer.UseNativeScan;
+            DFLogBuffer.UseNativeScan = true;
+            try
+            {
+                using (var buffer = new DFLogBuffer(Path.Combine(TestDataDir, "copter.bin")))
+                {
+                    var ok = buffer.TryGetColumnsNative("ATT", new[] { "TimeUS" }, out _, out var cols);
+                    Assert.True(ok);
+
+                    var r = 0;
+                    foreach (var item in buffer.GetEnumeratorType("ATT"))
+                    {
+                        var columnwise = buffer.dflog.GetTimeFromMs(cols[0][r] / 1000.0);
+                        Assert.Equal(item.time.Ticks, columnwise.Ticks);
+                        r++;
+                    }
+
+                    Assert.Equal(r, cols[0].Length);
+                }
+            }
+            finally
+            {
+                DFLogBuffer.UseNativeScan = old;
+            }
+        }
+
         [Fact]
         public void UnknownFieldFailsCleanly()
         {

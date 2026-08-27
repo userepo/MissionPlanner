@@ -1594,14 +1594,11 @@ main()
         bool GraphItem_GetListNative(string fieldname, string type, DataModifer dataModifier, bool left,
             string instance, string extra_label)
         {
-            // the time axis needs the per-item gps time correction - legacy path for now
-            if (chk_time.Checked)
-                return false;
+            var fields = new List<string> { fieldname };
 
-            string[] fields;
             double instanceValue = 0;
-            var hasInstance = instance != "";
-            if (hasInstance)
+            var instanceCol = -1;
+            if (instance != "")
             {
                 if (!double.TryParse(instance, NumberStyles.Any, CultureInfo.InvariantCulture, out instanceValue))
                     return false;
@@ -1610,27 +1607,59 @@ main()
                 if (instanceField == null)
                     return false;
 
-                fields = new[] { fieldname, instanceField };
-            }
-            else
-            {
-                fields = new[] { fieldname };
+                instanceCol = fields.Count;
+                fields.Add(instanceField);
             }
 
-            if (!logdata.TryGetColumnsNative(type, fields, out var linenos, out var columns))
+            // time x-axis: same field priority DFItem.timems uses; a type with
+            // no time field plots at timems 0, exactly like the legacy path
+            var timeCol = -1;
+            double timeDivisor = 1;
+            if (chk_time.Checked)
+            {
+                string timeField = null;
+                if (logdata.dflog.FindMessageOffset(type, "TimeMS") >= 0)
+                    timeField = "TimeMS";
+                else if (logdata.dflog.FindMessageOffset(type, "TimeUS") >= 0)
+                {
+                    timeField = "TimeUS";
+                    timeDivisor = 1000.0;
+                }
+                else if (logdata.dflog.FindMessageOffset(type, "T") >= 0)
+                    timeField = "T";
+
+                if (timeField != null)
+                {
+                    timeCol = fields.Count;
+                    fields.Add(timeField);
+                }
+            }
+
+            if (!logdata.TryGetColumnsNative(type, fields.ToArray(), out var linenos, out var columns))
                 return false;
 
             log.Info("GraphItem_GetListNative " + type + " " + fieldname + " rows " + linenos.Length);
 
             var list1 = new PointPairList();
             var values = columns[0];
-            var instances = hasInstance ? columns[1] : null;
+            var instances = instanceCol >= 0 ? columns[instanceCol] : null;
+            var timesms = timeCol >= 0 ? columns[timeCol] : null;
             for (var i = 0; i < values.Length; i++)
             {
                 if (instances != null && instances[i] != instanceValue)
                     continue;
 
-                list1.Add(linenos[i], ApplyDataModifier(values[i], dataModifier));
+                var value = ApplyDataModifier(values[i], dataModifier);
+
+                if (chk_time.Checked)
+                {
+                    var timems = timesms != null ? timesms[i] / timeDivisor : 0;
+                    list1.Add(new XDate(logdata.dflog.GetTimeFromMs(timems)), value);
+                }
+                else
+                {
+                    list1.Add(linenos[i], value);
+                }
             }
 
             Invoke((Action)delegate { GraphItem_AddCurve(list1, type, fieldname, left, instance, false, extra_label); });
