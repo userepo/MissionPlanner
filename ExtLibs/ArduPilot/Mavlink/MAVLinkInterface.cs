@@ -5974,10 +5974,23 @@ Mission Planner waits for 2 valid heartbeat packets before connecting
             return new FileStream(await GetLog(MAV.sysid, MAV.compid, no), FileMode.Open, FileAccess.ReadWrite);
         }
 
-        public async Task<string> GetLog(byte sysid, byte compid, ushort no, CancellationToken cancel = default)
-        {
-            var filename = Path.GetTempFileName();
+        /// <summary>GetLog: ms of LOG_DATA silence before the request is retried</summary>
+        internal int LogDataTimeoutMs { get; set; } = 3000;
 
+        /// <summary>GetLog: ms of LOG_DATA silence before missing blocks are re-requested</summary>
+        internal int LogDataRefetchMs { get; set; } = 500;
+
+        public Task<string> GetLog(byte sysid, byte compid, ushort no, CancellationToken cancel = default)
+        {
+            return GetLogInternal(sysid, compid, no, Path.GetTempFileName(), cancel);
+        }
+
+        /// <summary>
+        /// Download log <paramref name="no"/> into <paramref name="filename"/>. The file is
+        /// created (or truncated), and deleted again on failure or cancellation.
+        /// </summary>
+        internal async Task<string> GetLogInternal(byte sysid, byte compid, ushort no, string filename, CancellationToken cancel)
+        {
             ConcurrentQueue<MAVLinkMessage> queue = new ConcurrentQueue<MAVLinkMessage>();
             SemaphoreSlim queueSignal = new SemaphoreSlim(0);
             EventHandler<MAVLinkMessage> handler = (sender, msg) =>
@@ -6036,8 +6049,8 @@ Mission Planner waits for 2 valid heartbeat packets before connecting
                     while (true)
                     {
                         // park until the handler queues a LOG_DATA packet
-                        // false means 3s of silence - resend the request
-                        if (!await queueSignal.WaitAsync(3000, cancel).ConfigureAwait(false))
+                        // false means LogDataTimeoutMs of silence - resend the request
+                        if (!await queueSignal.WaitAsync(LogDataTimeoutMs, cancel).ConfigureAwait(false))
                         {
                             if (retrys > 0)
                             {
@@ -6145,9 +6158,9 @@ Mission Planner waits for 2 valid heartbeat packets before connecting
                             return filename;
                         }
 
-                        // park until more data arrives; 500ms of silence means the
-                        // current request ran dry - ask for what is still missing
-                        if (!await queueSignal.WaitAsync(500, cancel).ConfigureAwait(false))
+                        // park until more data arrives; LogDataRefetchMs of silence means
+                        // the current request ran dry - ask for what is still missing
+                        if (!await queueSignal.WaitAsync(LogDataRefetchMs, cancel).ConfigureAwait(false))
                         {
                             RequestFirstMissing();
                             continue;
@@ -6205,7 +6218,7 @@ Mission Planner waits for 2 valid heartbeat packets before connecting
             }
             catch
             {
-                // dont leave a partial temp file behind on timeout/cancel/link loss
+                // dont leave a partial file behind on timeout/cancel/link loss
                 try
                 {
                     File.Delete(filename);
