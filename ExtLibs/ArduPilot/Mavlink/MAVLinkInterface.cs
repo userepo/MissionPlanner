@@ -5995,7 +5995,12 @@ Mission Planner waits for 2 valid heartbeat packets before connecting
             SemaphoreSlim queueSignal = new SemaphoreSlim(0);
             EventHandler<MAVLinkMessage> handler = (sender, msg) =>
             {
-                if (msg.msgid == (byte) MAVLINK_MSG_ID.LOG_DATA)
+                // filter on the header fields here so unrelated traffic - e.g.
+                // another vehicle's log stream on the same link - cannot grow
+                // the queue or reset the silence timers; the log id needs a
+                // payload parse and stays checked on the consumer side
+                if (msg.msgid == (byte) MAVLINK_MSG_ID.LOG_DATA && msg.sysid == sysid &&
+                    msg.compid == compid)
                 {
                     queue.Enqueue(msg);
                     try

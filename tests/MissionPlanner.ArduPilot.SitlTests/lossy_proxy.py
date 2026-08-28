@@ -29,7 +29,9 @@ def pump_gcs_to_vehicle(gcs, veh):
 
 
 def pump_vehicle_to_gcs(veh, gcs):
-    buf = b""
+    # bytearray + index cursor: repeated += / slicing on immutable bytes
+    # would reallocate the whole buffer per frame (O(n^2) on large logs)
+    buf = bytearray()
     seen = 0
     dropped = 0
     try:
@@ -37,39 +39,41 @@ def pump_vehicle_to_gcs(veh, gcs):
             d = veh.recv(4096)
             if not d:
                 break
-            buf += d
-            out = b""
-            while buf:
-                b0 = buf[0]
+            buf.extend(d)
+            out = []
+            pos = 0
+            while pos < len(buf):
+                b0 = buf[pos]
                 if b0 == 0xFD:  # MAVLink2: 10 byte hdr + payload + 2 crc (+13 sig)
-                    if len(buf) < 10:
+                    if len(buf) - pos < 10:
                         break
-                    length = 12 + buf[1] + (13 if buf[2] & 0x01 else 0)
-                    if len(buf) < length:
+                    length = 12 + buf[pos + 1] + (13 if buf[pos + 2] & 0x01 else 0)
+                    if len(buf) - pos < length:
                         break
-                    msgid = buf[7] | (buf[8] << 8) | (buf[9] << 16)
+                    msgid = buf[pos + 7] | (buf[pos + 8] << 8) | (buf[pos + 9] << 16)
                 elif b0 == 0xFE:  # MAVLink1: 6 byte hdr + payload + 2 crc
-                    if len(buf) < 6:
+                    if len(buf) - pos < 6:
                         break
-                    length = 8 + buf[1]
-                    if len(buf) < length:
+                    length = 8 + buf[pos + 1]
+                    if len(buf) - pos < length:
                         break
-                    msgid = buf[5]
+                    msgid = buf[pos + 5]
                 else:
-                    out += buf[:1]
-                    buf = buf[1:]
+                    out.append(buf[pos:pos + 1])
+                    pos += 1
                     continue
 
-                frame = buf[:length]
-                buf = buf[length:]
+                frame = buf[pos:pos + length]
+                pos += length
                 if msgid == LOG_DATA:
                     seen += 1
                     if seen % DROP_EVERY == 0:
                         dropped += 1
                         continue
-                out += frame
+                out.append(frame)
+            del buf[:pos]
             if out:
-                gcs.sendall(out)
+                gcs.sendall(b"".join(out))
     except OSError:
         pass
     finally:

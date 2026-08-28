@@ -182,6 +182,8 @@ namespace MissionPlanner.Log
                 }
                 AppendSerialLog(string.Format(LogStrings.DownloadStarting, Settings.Instance.LogDir));
 
+                // the previous download (if any) has finished - the buttons gate on that
+                downloadCts?.Dispose();
                 downloadCts = new CancellationTokenSource();
                 var cancel = downloadCts.Token;
                 System.Threading.Thread t11 =
@@ -202,7 +204,21 @@ namespace MissionPlanner.Log
             log.Info("GetLog " + entry.id);
 
             MainV2.comPort.Progress += ComPort_Progress;
+            try
+            {
+                return await GetLogUnsubscribed(entry, cancel).ConfigureAwait(false);
+            }
+            finally
+            {
+                // always drop the handler, also when the download throws or is
+                // canceled - a leaked handler would double-count progress on
+                // the next download
+                MainV2.comPort.Progress -= ComPort_Progress;
+            }
+        }
 
+        async Task<string> GetLogUnsubscribed(MAVLink.mavlink_log_entry_t entry, CancellationToken cancel)
+        {
             status = SerialStatus.Reading;
 
             // get df log from mav
@@ -237,7 +253,7 @@ namespace MissionPlanner.Log
             if (logtime.Year < 1990)
             {
                 log.Info("about to GetFirstGpsTime: " + logfile);
-                // get gps time of assci log
+                // scan the downloaded log for its first gps time
                 var dflb = new DFLogBuffer(logfile);
                 logtime = dflb.dflog.gpsstarttime;
                 dflb.Clear();
@@ -264,18 +280,28 @@ namespace MissionPlanner.Log
                 }
             }
 
-            MainV2.comPort.Progress -= ComPort_Progress;
-
             return logfile;
         }
 
         protected override void OnClosed(EventArgs e)
         {
             this.closed = true;
-            downloadCts?.Cancel();
+            CancelDownload();
             MainV2.comPort.Progress -= ComPort_Progress;
 
             base.OnClosed(e);
+        }
+
+        void CancelDownload()
+        {
+            try
+            {
+                downloadCts?.Cancel();
+            }
+            catch (ObjectDisposedException)
+            {
+                // the download finished and disposed the source just as we canceled
+            }
         }
 
         protected override void OnClosing(CancelEventArgs e)
@@ -290,7 +316,7 @@ namespace MissionPlanner.Log
                 }
 
                 // actually stop the transfer, not just the form
-                downloadCts?.Cancel();
+                CancelDownload();
             }
 
             base.OnClosing(e);
@@ -375,13 +401,19 @@ namespace MissionPlanner.Log
             {
                 AppendSerialLog("Error in log " + ex.Message);
             }
+            finally
+            {
+                // this download owns the token source - release it before the
+                // buttons re-arm; Cancel racing this from OnClosing is handled there
+                Interlocked.Exchange(ref downloadCts, null)?.Dispose();
 
-            RunOnUIThread(() =>
+                RunOnUIThread(() =>
                 {
                     BUT_DLall.Enabled = true;
                     BUT_DLthese.Enabled = true;
                     status = SerialStatus.Done;
                 });
+            }
         }
 
         IEnumerable<int> GetSelectedLogIndices()
@@ -406,10 +438,12 @@ namespace MissionPlanner.Log
         {
             RunOnUIThread(() =>
             {
-                // scale to 0-1000 so byte counts beyond int.MaxValue dont overflow the ProgressBar
+                // scale to 0-1000 so byte counts beyond int.MaxValue don't overflow the
+                // ProgressBar; clamp because the sender may deliver more bytes than the
+                // LOG_ENTRY size it reported
                 progressBar1.Minimum = 0;
                 progressBar1.Maximum = 1000;
-                progressBar1.Value = max == 0 ? 0 : (int)(current * 1000.0 / max);
+                progressBar1.Value = max == 0 ? 0 : (int)Math.Min(1000.0, current * 1000.0 / max);
                 progressBar1.Visible = (current < max);
 
                 if (current == 0)
@@ -454,6 +488,8 @@ namespace MissionPlanner.Log
                 {
                     BUT_DLall.Enabled = false;
                     BUT_DLthese.Enabled = false;
+                    // the previous download (if any) has finished - the buttons gate on that
+                    downloadCts?.Dispose();
                     downloadCts = new CancellationTokenSource();
                     var cancel = downloadCts.Token;
                     System.Threading.Thread t11 = new System.Threading.Thread(delegate () { DownloadThread(toDownload, cancel); })
