@@ -1596,19 +1596,18 @@ main()
         {
             var fields = new List<string> { fieldname };
 
-            double instanceValue = 0;
-            var instanceCol = -1;
+            // the native side filters rows to the requested instance - no need
+            // to fetch the instance column and drop rows here
+            long? instanceFilter = null;
             if (instance != "")
             {
-                if (!double.TryParse(instance, NumberStyles.Any, CultureInfo.InvariantCulture, out instanceValue))
+                if (!long.TryParse(instance, NumberStyles.Any, CultureInfo.InvariantCulture, out var instanceValue))
                     return false;
 
-                var instanceField = logdata.GetInstanceFieldName(type);
-                if (instanceField == null)
+                if (logdata.GetInstanceFieldName(type) == null)
                     return false;
 
-                instanceCol = fields.Count;
-                fields.Add(instanceField);
+                instanceFilter = instanceValue;
             }
 
             // time x-axis: same field priority DFItem.timems uses; a type with
@@ -1635,20 +1634,17 @@ main()
                 }
             }
 
-            if (!logdata.TryGetColumnsNative(type, fields.ToArray(), out var linenos, out var columns))
+            if (!logdata.TryGetColumnsNative(type, fields.ToArray(), instanceFilter, out var linenos,
+                    out var columns))
                 return false;
 
             log.Info("GraphItem_GetListNative " + type + " " + fieldname + " rows " + linenos.Length);
 
             var list1 = new PointPairList();
             var values = columns[0];
-            var instances = instanceCol >= 0 ? columns[instanceCol] : null;
             var timesms = timeCol >= 0 ? columns[timeCol] : null;
             for (var i = 0; i < values.Length; i++)
             {
-                if (instances != null && instances[i] != instanceValue)
-                    continue;
-
                 var value = ApplyDataModifier(values[i], dataModifier);
 
                 if (chk_time.Checked)

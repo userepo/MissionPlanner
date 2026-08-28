@@ -54,6 +54,60 @@ namespace MissionPlanner.Utilities.Tests
             }
         }
 
+        /// <summary>
+        /// The native instance filter must select exactly the rows the managed
+        /// filter-after-fetch approach selects: per-instance results partition
+        /// the unfiltered rows, lineno for lineno, value for value.
+        /// </summary>
+        [Fact]
+        public void NativeInstanceFilterMatchesManagedFiltering()
+        {
+            var old = DFLogBuffer.UseNativeScan;
+            DFLogBuffer.UseNativeScan = true;
+            try
+            {
+                using (var buffer = new DFLogBuffer(Path.Combine(TestDataDir, "copter.bin")))
+                {
+                    var instanceField = buffer.GetInstanceFieldName("IMU");
+                    Assert.Equal("I", instanceField);
+
+                    var fields = new[] { "GyrX", instanceField };
+                    Assert.True(buffer.TryGetColumnsNative("IMU", fields, out var allLinenos, out var allCols));
+
+                    var instances = allCols[1].Distinct().OrderBy(v => v).ToArray();
+                    Assert.True(instances.Length > 1, "corpus IMU should have multiple instances");
+
+                    var seenLinenos = new List<long>();
+                    foreach (var instance in instances)
+                    {
+                        Assert.True(buffer.TryGetColumnsNative("IMU", fields, (long)instance,
+                            out var linenos, out var cols));
+
+                        // the managed way: fetch everything, keep matching rows
+                        var expected = Enumerable.Range(0, allLinenos.Length)
+                            .Where(i => allCols[1][i] == instance).ToArray();
+
+                        Assert.Equal(expected.Select(i => allLinenos[i]), linenos);
+                        Assert.Equal(expected.Select(i => allCols[0][i]), cols[0]);
+                        Assert.True(cols[1].All(v => v == instance));
+                        seenLinenos.AddRange(linenos);
+                    }
+
+                    // the per-instance results partition the unfiltered rows
+                    seenLinenos.Sort();
+                    Assert.Equal(allLinenos, seenLinenos);
+
+                    // a type without an instance field fails instead of guessing
+                    Assert.False(buffer.TryGetColumnsNative("ATT", new[] { "Roll" }, 0,
+                        out _, out _));
+                }
+            }
+            finally
+            {
+                DFLogBuffer.UseNativeScan = old;
+            }
+        }
+
         [Fact]
         public void TruncatedTailDecodesLikeManaged()
         {

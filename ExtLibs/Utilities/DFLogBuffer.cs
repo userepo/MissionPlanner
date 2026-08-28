@@ -105,6 +105,18 @@ namespace MissionPlanner.Utilities
         /// </summary>
         public bool TryGetColumnsNative(string type, string[] fields, out long[] linenos, out double[][] columns)
         {
+            return TryGetColumnsNative(type, fields, null, out linenos, out columns);
+        }
+
+        /// <summary>
+        /// <see cref="TryGetColumnsNative(string,string[],out long[],out double[][])"/>
+        /// limited to rows of one <paramref name="instance"/> value (the field
+        /// carrying the '#' unit id - the same column GetInstanceFieldName
+        /// reports). Returns false when the type has no instance field.
+        /// </summary>
+        public bool TryGetColumnsNative(string type, string[] fields, long? instance, out long[] linenos,
+            out double[][] columns)
+        {
             linenos = null;
             columns = null;
 
@@ -119,7 +131,8 @@ namespace MissionPlanner.Utilities
                     nativeColumns = DFLogNative.ColumnReader.Open(_filename);
                 }
 
-                return nativeColumns != null && nativeColumns.TryGetColumns(type, fields, out linenos, out columns);
+                return nativeColumns != null &&
+                       nativeColumns.TryGetColumns(type, fields, instance, out linenos, out columns);
             }
         }
 

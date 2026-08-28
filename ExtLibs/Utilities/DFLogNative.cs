@@ -18,7 +18,7 @@ namespace MissionPlanner.Utilities
 
         /// <summary>the ABI this build expects; the checked-in and freshly
         /// built libraries must both report it (see rust/update-dll.bat)</summary>
-        internal const uint AbiVersion = 4;
+        internal const uint AbiVersion = 5;
 
         [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)]
         static extern uint dflog_abi_version();
@@ -40,6 +40,10 @@ namespace MissionPlanner.Utilities
 
         [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)]
         static extern int dflog_get_columns(IntPtr file, byte[] typeUtf8, byte[] fieldsUtf8, out IntPtr columns);
+
+        [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)]
+        static extern int dflog_get_columns_filtered(IntPtr file, byte[] typeUtf8, byte[] fieldsUtf8,
+            int hasInstance, long instance, out IntPtr columns);
 
         [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)]
         static extern void dflog_columns_free(IntPtr columns);
@@ -127,6 +131,18 @@ namespace MissionPlanner.Utilities
             /// </summary>
             public bool TryGetColumns(string type, string[] fields, out long[] linenos, out double[][] columns)
             {
+                return TryGetColumns(type, fields, null, out linenos, out columns);
+            }
+
+            /// <summary>
+            /// <see cref="TryGetColumns(string,string[],out long[],out double[][])"/>
+            /// limited to rows of one <paramref name="instance"/> value (the
+            /// field carrying the '#' unit id, e.g. IMU.I). Fails when the
+            /// type has no instance field.
+            /// </summary>
+            public bool TryGetColumns(string type, string[] fields, long? instance, out long[] linenos,
+                out double[][] columns)
+            {
                 linenos = null;
                 columns = null;
 
@@ -136,7 +152,8 @@ namespace MissionPlanner.Utilities
                 var handle = IntPtr.Zero;
                 try
                 {
-                    var rc = dflog_get_columns(_file, Utf8Z(type), Utf8Z(string.Join(",", fields)), out handle);
+                    var rc = dflog_get_columns_filtered(_file, Utf8Z(type), Utf8Z(string.Join(",", fields)),
+                        instance.HasValue ? 1 : 0, instance ?? 0, out handle);
                     if (rc != 0)
                     {
                         log.WarnFormat("dflog_get_columns({0}) failed ({1}): {2}", type, rc, LastError());

@@ -22,7 +22,7 @@ pub const DFLOG_ERR_IO: i32 = -2;
 pub const DFLOG_ERR_PANIC: i32 = -3;
 
 /// Bumped when the ABI changes shape; checked by the C# side.
-pub const DFLOG_ABI_VERSION: u32 = 4;
+pub const DFLOG_ABI_VERSION: u32 = 5;
 
 pub const DFLOG_ERR_NO_TIME_BASE: i32 = -5;
 
@@ -209,6 +209,40 @@ pub unsafe extern "C" fn dflog_get_columns(
     fields_utf8: *const c_char,
     out: *mut *mut DflogColumns,
 ) -> i32 {
+    // SAFETY: forwarded caller contract
+    unsafe { get_columns_impl(file, type_utf8, fields_utf8, None, out) }
+}
+
+/// `dflog_get_columns` limited to one instance value (the field whose FMTU
+/// unit id is '#') when `has_instance` is non-zero. A type without an
+/// instance field fails with `DFLOG_ERR_QUERY`.
+///
+/// # Safety
+/// `file` must be a live `dflog_open` handle; the strings must be valid
+/// NUL-terminated UTF-8; `out` must be a valid pointer.
+#[no_mangle]
+pub unsafe extern "C" fn dflog_get_columns_filtered(
+    file: *const DflogFile,
+    type_utf8: *const c_char,
+    fields_utf8: *const c_char,
+    has_instance: i32,
+    instance: i64,
+    out: *mut *mut DflogColumns,
+) -> i32 {
+    let instance = (has_instance != 0).then_some(instance);
+    // SAFETY: forwarded caller contract
+    unsafe { get_columns_impl(file, type_utf8, fields_utf8, instance, out) }
+}
+
+/// # Safety
+/// Same contract as `dflog_get_columns`.
+unsafe fn get_columns_impl(
+    file: *const DflogFile,
+    type_utf8: *const c_char,
+    fields_utf8: *const c_char,
+    instance: Option<i64>,
+    out: *mut *mut DflogColumns,
+) -> i32 {
     if file.is_null() || type_utf8.is_null() || fields_utf8.is_null() || out.is_null() {
         set_last_error("null argument".into());
         return DFLOG_ERR_BAD_ARGUMENT;
@@ -236,7 +270,7 @@ pub unsafe extern "C" fn dflog_get_columns(
     let log = unsafe { &(*file).log };
 
     match catch_unwind(AssertUnwindSafe(|| {
-        dflog_core::columns::get_columns(log, type_name, &fields)
+        dflog_core::columns::get_columns_filtered(log, type_name, &fields, instance)
     })) {
         Ok(Ok(cols)) => {
             let mut boxed = Box::new(DflogColumns {
