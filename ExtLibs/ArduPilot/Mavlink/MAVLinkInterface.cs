@@ -6039,6 +6039,9 @@ Mission Planner waits for 2 valid heartbeat packets before connecting
                     // received 90-byte block numbers; every block below lowestMissing is known received
                     HashSet<uint> set = new HashSet<uint>();
                     uint lowestMissing = 0;
+                    // how far past the contiguous frontier a packet may sit and still raise
+                    // the end-of-log bar; genuine streams are near-contiguous
+                    const uint endDetectionSlack = 90 * 100;
 
                     giveComport = false;
                     MAVLinkMessage buffer = MAVLinkMessage.Invalid;
@@ -6112,7 +6115,11 @@ Mission Planner waits for 2 valid heartbeat packets before connecting
                                 set.Add(data.ofs / 90);
                                 while (set.Contains(lowestMissing))
                                     lowestMissing++;
-                                maxEnd = Math.Max(maxEnd, data.ofs + data.count);
+                                // only packets near the contiguous frontier raise the bar the
+                                // end packet must clear - a corrupt far offset must not poison
+                                // end-of-log detection for the whole download
+                                if (data.ofs <= (ulong) lowestMissing * 90 + endDetectionSlack)
+                                    maxEnd = Math.Max(maxEnd, data.ofs + data.count);
 
                                 if (ms.Position != data.ofs)
                                     ms.Seek((long) data.ofs, SeekOrigin.Begin);
@@ -6134,10 +6141,12 @@ Mission Planner waits for 2 valid heartbeat packets before connecting
                                 }
 
                                 // a short or empty packet ends the log, but only trust it at the highest
-                                // offset seen - a reordered short packet must not truncate the download
+                                // offset seen - a reordered short packet must not truncate the download.
+                                // the length comes from the end packet itself: the bar can lag behind
+                                // a stalled frontier and must not stand in for the real log length
                                 if (data.count < 90 && data.ofs + data.count >= maxEnd)
                                 {
-                                    totallength = maxEnd;
+                                    totallength = data.ofs + data.count;
                                     log.Info("start fillin len " + totallength + " count " + set.Count + " datalen " +
                                              data.count);
                                     break;
@@ -6153,6 +6162,11 @@ Mission Planner waits for 2 valid heartbeat packets before connecting
                     log.Info("count total " + totalBlocks);
                     log.Info("totallength " + totallength);
                     log.Info("current length " + ms.Length);
+
+                    // a corrupt far-offset packet in the streaming phase may have grown the
+                    // file past the log - the returned file must not be longer than the log
+                    if (ms.Length > totallength)
+                        ms.SetLength(totallength);
 
                     // request the first run of still-missing blocks
                     void RequestFirstMissing()
@@ -6231,7 +6245,7 @@ Mission Planner waits for 2 valid heartbeat packets before connecting
                                 bps += data.count;
 
                                 // record what we have received
-                                set.Add(data.ofs / 90);
+                                var newBlock = set.Add(data.ofs / 90);
                                 while (set.Contains(lowestMissing))
                                     lowestMissing++;
 
@@ -6255,8 +6269,10 @@ Mission Planner waits for 2 valid heartbeat packets before connecting
 
                                 // this fill run has caught up to data we already hold -
                                 // request the next missing run now instead of waiting
-                                // out the 500ms silence
-                                if (set.Contains((data.ofs / 90) + 1))
+                                // out the 500ms silence. only a newly received block may
+                                // trigger this: stale or duplicated packets must not each
+                                // fire another request on a duplicating link
+                                if (newBlock && set.Contains((data.ofs / 90) + 1))
                                     RequestFirstMissing();
                             }
                         }

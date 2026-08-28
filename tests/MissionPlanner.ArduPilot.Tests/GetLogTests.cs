@@ -210,6 +210,75 @@ namespace MissionPlanner.ArduPilot.Tests
         }
 
         [Fact]
+        public async Task StaleDuplicatesDoNotMultiplyFillRequests()
+        {
+            var log = MakeLog(1000);
+            using (var vehicle = new FakeLogVehicle(log))
+            {
+                var drop = new HashSet<uint> { 3 };
+                var fillRequests = 0;
+                vehicle.OnRequest = req =>
+                {
+                    if (Interlocked.Increment(ref fillRequests) > 1)
+                    {
+                        // before serving the gap, flood stale duplicates of blocks the
+                        // download already holds - they must not each trigger another
+                        // fill request on a duplicating link
+                        for (var i = 0; i < 30; i++)
+                        {
+                            vehicle.SendBlock(8 * BlockSize, BlockSize);
+                            vehicle.SendBlock(9 * BlockSize, BlockSize);
+                        }
+                    }
+
+                    vehicle.Serve(req, drop);
+                };
+
+                var result = await Download(vehicle, TestContext.Current.CancellationToken);
+
+                Assert.Equal(log, result);
+                lock (vehicle.Requests)
+                    Assert.True(vehicle.Requests.Count <= 8,
+                        $"{vehicle.Requests.Count} requests for one dropped block - stale " +
+                        "duplicates are multiplying fill requests");
+            }
+        }
+
+        [Fact]
+        public async Task CorruptFarOffsetDoesNotBreakEndDetection()
+        {
+            var log = MakeLog(1234);
+            using (var vehicle = new FakeLogVehicle(log))
+            {
+                var corruptSent = false;
+                vehicle.OnRequest = req =>
+                {
+                    var end = Math.Min((ulong)req.ofs + req.count, (ulong)log.Length);
+                    for (var ofs = (ulong)req.ofs; ofs < end; ofs += BlockSize)
+                    {
+                        // a corrupt-but-valid-looking packet at a far offset must neither
+                        // poison end-of-log detection nor lengthen the returned file
+                        if (ofs == 5 * BlockSize && !corruptSent)
+                        {
+                            corruptSent = true;
+                            vehicle.Send(MAVLink.MAVLINK_MSG_ID.LOG_DATA,
+                                new MAVLink.mavlink_log_data_t(1_000_000, LogId, BlockSize,
+                                    new byte[BlockSize]));
+                        }
+
+                        vehicle.SendBlock((uint)ofs, (int)Math.Min(BlockSize, end - ofs));
+                    }
+                };
+
+                var result = await Download(vehicle, TestContext.Current.CancellationToken);
+
+                Assert.True(result.Length == log.Length,
+                    $"corrupt far-offset packet changed the file length: {result.Length} != {log.Length}");
+                Assert.Equal(log, result);
+            }
+        }
+
+        [Fact]
         public async Task IgnoresPacketWithOversizedCount()
         {
             var log = MakeLog(1234);
