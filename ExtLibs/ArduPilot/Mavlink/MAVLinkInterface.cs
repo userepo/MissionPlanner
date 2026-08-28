@@ -6015,6 +6015,23 @@ Mission Planner waits for 2 valid heartbeat packets before connecting
             };
             OnPacketReceived += handler;
 
+            // formally end the log session; best effort - the link may already be gone
+            void SendLogRequestEnd()
+            {
+                try
+                {
+                    var end = new mavlink_log_request_end_t
+                    {
+                        target_system = sysid,
+                        target_component = compid
+                    };
+                    generatePacket((byte) MAVLINK_MSG_ID.LOG_REQUEST_END, end);
+                }
+                catch
+                {
+                }
+            }
+
             try
             {
                 using (FileStream ms = new FileStream(filename, FileMode.Create, FileAccess.ReadWrite))
@@ -6080,6 +6097,10 @@ Mission Planner waits for 2 valid heartbeat packets before connecting
                                 var data = buffer.ToStructure<mavlink_log_data_t>();
 
                                 if (data.id != no)
+                                    continue;
+
+                                // a corrupt count would overrun the fixed 90-byte payload
+                                if (data.count > data.data.Length)
                                     continue;
 
                                 // reset retrys
@@ -6155,11 +6176,17 @@ Mission Planner waits for 2 valid heartbeat packets before connecting
                         generatePacket((byte) MAVLINK_MSG_ID.LOG_REQUEST_DATA, req);
                     }
 
+                    // the same total silence budget as the streaming phase - a vehicle
+                    // that stops answering fill-in requests must not hang the download
+                    int dryWindows = 0;
+                    int maxDryWindows = Math.Max(1, LogDataTimeoutMs * 3 / Math.Max(1, LogDataRefetchMs));
+
                     while ((BaseStream != null && BaseStream.IsOpen) || logreadmode)
                     {
                         if (ms.Length >= totallength && lowestMissing >= totalBlocks)
                         {
                             giveComport = false;
+                            SendLogRequestEnd();
                             return filename;
                         }
 
@@ -6167,9 +6194,17 @@ Mission Planner waits for 2 valid heartbeat packets before connecting
                         // the current request ran dry - ask for what is still missing
                         if (!await queueSignal.WaitAsync(LogDataRefetchMs, cancel).ConfigureAwait(false))
                         {
+                            if (++dryWindows > maxDryWindows)
+                            {
+                                giveComport = false;
+                                throw new TimeoutException("Timeout on read - GetLog fill-in");
+                            }
+
                             RequestFirstMissing();
                             continue;
                         }
+
+                        dryWindows = 0;
 
                         if (!queue.TryDequeue(out buffer))
                             continue;
@@ -6182,6 +6217,15 @@ Mission Planner waits for 2 valid heartbeat packets before connecting
                                 var data = buffer.ToStructure<mavlink_log_data_t>();
 
                                 if (data.id != no)
+                                    continue;
+
+                                // a corrupt count would overrun the fixed 90-byte payload
+                                if (data.count > data.data.Length)
+                                    continue;
+
+                                // fill-in data must stay inside the log bounds established by
+                                // the streaming phase - a bogus offset must not extend the file
+                                if ((ulong) data.ofs + data.count > totallength)
                                     continue;
 
                                 bps += data.count;
@@ -6225,20 +6269,9 @@ Mission Planner waits for 2 valid heartbeat packets before connecting
             {
                 // tell the vehicle to stop streaming - an abandoned download otherwise
                 // keeps LOG_DATA flowing and breaks the next log operation
-                try
-                {
-                    var end = new mavlink_log_request_end_t
-                    {
-                        target_system = sysid,
-                        target_component = compid
-                    };
-                    generatePacket((byte) MAVLINK_MSG_ID.LOG_REQUEST_END, end);
-                }
-                catch
-                {
-                }
+                SendLogRequestEnd();
 
-                // dont leave a partial file behind on timeout/cancel/link loss
+                // don't leave a partial file behind on timeout/cancel/link loss
                 try
                 {
                     File.Delete(filename);

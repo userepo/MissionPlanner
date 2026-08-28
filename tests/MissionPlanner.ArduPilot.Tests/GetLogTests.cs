@@ -204,6 +204,88 @@ namespace MissionPlanner.ArduPilot.Tests
                 var result = await Download(vehicle, TestContext.Current.CancellationToken);
 
                 Assert.Equal(log, result);
+                Assert.True(vehicle.EndRequests > 0,
+                    "LOG_REQUEST_END not sent after a completed download");
+            }
+        }
+
+        [Fact]
+        public async Task IgnoresPacketWithOversizedCount()
+        {
+            var log = MakeLog(1234);
+            using (var vehicle = new FakeLogVehicle(log))
+            {
+                vehicle.OnRequest = req =>
+                {
+                    // count larger than the 90-byte payload array must be skipped,
+                    // not abort the download
+                    vehicle.Send(MAVLink.MAVLINK_MSG_ID.LOG_DATA,
+                        new MAVLink.mavlink_log_data_t(0, LogId, 200, new byte[BlockSize]));
+                    vehicle.Serve(req);
+                };
+
+                var result = await Download(vehicle, TestContext.Current.CancellationToken);
+
+                Assert.Equal(log, result);
+            }
+        }
+
+        [Fact]
+        public async Task BogusFillinOffsetDoesNotExtendFile()
+        {
+            var log = MakeLog(1000);
+            using (var vehicle = new FakeLogVehicle(log))
+            {
+                var drop = new HashSet<uint> { 3 };
+                var bogusSent = false;
+                vehicle.OnRequest = req =>
+                {
+                    if (req.ofs == 3 * BlockSize && !bogusSent)
+                    {
+                        // a fill-in response beyond the end of the log must not
+                        // grow the file past the length the end marker established
+                        bogusSent = true;
+                        vehicle.Send(MAVLink.MAVLINK_MSG_ID.LOG_DATA,
+                            new MAVLink.mavlink_log_data_t((uint)(log.Length + 10 * BlockSize),
+                                LogId, BlockSize, new byte[BlockSize]));
+                    }
+
+                    vehicle.Serve(req, drop);
+                };
+
+                var result = await Download(vehicle, TestContext.Current.CancellationToken);
+
+                Assert.True(result.Length == log.Length,
+                    $"bogus fill-in offset changed the file length: {result.Length} != {log.Length}");
+                Assert.Equal(log, result);
+            }
+        }
+
+        [Fact]
+        public async Task FillinTimesOutWhenVehicleGoesSilent()
+        {
+            var log = MakeLog(1000);
+            using (var vehicle = new FakeLogVehicle(log))
+            using (var dir = new TestDir())
+            {
+                // serve the streaming phase with a block missing, then never answer
+                // the fill-in requests - the download must fail, not hang forever
+                var first = true;
+                vehicle.OnRequest = req =>
+                {
+                    if (!first)
+                        return;
+                    first = false;
+                    vehicle.Serve(req, new HashSet<uint> { 3 });
+                };
+
+                var path = dir.File("log.bin");
+
+                await Assert.ThrowsAsync<TimeoutException>(
+                    () => vehicle.Mav.GetLogInternal(VehicleSysid, VehicleCompid, LogId, path,
+                        TestContext.Current.CancellationToken));
+
+                Assert.False(File.Exists(path), "partial file left behind after fill-in timeout");
             }
         }
 
