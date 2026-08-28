@@ -1585,11 +1585,13 @@ main()
 
         /// <summary>
         /// Typed fast path for GraphItem_GetList: pulls the whole column via
-        /// DFLogBuffer.TryGetColumnsNative instead of per-row string parsing.
-        /// Returns false (caller runs the legacy loop) when the native path is
-        /// off/unavailable, the time x-axis is requested, or the instance
-        /// column cannot be resolved. Values are the raw decoded values - not
-        /// rounded through 7-significant-digit strings like the legacy path.
+        /// DFLogBuffer.TryGetColumnsNative instead of per-row string parsing;
+        /// an instanced request (e.g. IMU[1]) is filtered on the native side,
+        /// so only matching rows are marshaled. Returns false (caller runs
+        /// the legacy loop) when the native path is off/unavailable or the
+        /// instance column cannot be resolved. Values are the raw decoded
+        /// values - not rounded through 7-significant-digit strings like the
+        /// legacy path.
         /// </summary>
         bool GraphItem_GetListNative(string fieldname, string type, DataModifer dataModifier, bool left,
             string instance, string extra_label)

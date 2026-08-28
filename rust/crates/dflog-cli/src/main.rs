@@ -8,8 +8,9 @@
 //!                                            BinaryLog.ConvertBin (headless:
 //!                                            M fields as mode numbers)
 //!   dflog parquet <log.bin> <out-dir> [TYPES]  one parquet file per message
-//!                                            type (builds with
-//!                                            --features parquet)
+//!                                            type, or per instance value
+//!                                            with --split-instances (builds
+//!                                            with --features parquet)
 
 use std::fs::File;
 use std::io::{BufWriter, Write};
