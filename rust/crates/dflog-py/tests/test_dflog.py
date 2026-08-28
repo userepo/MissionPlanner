@@ -87,6 +87,34 @@ def test_messages_iteration():
     repr(first)
 
 
+def test_instance_filtering():
+    log = dflog.LogFile(str(CORPUS / "copter.bin"))
+
+    assert log.instance_field("IMU") == "I"
+    assert log.instance_field("ATT") is None
+    assert log.instances("IMU") == [0, 1]  # SITL simulates two IMUs
+    assert log.instances("ATT") == []
+    try:
+        log.instances("NOPE")
+        raise AssertionError("expected KeyError")
+    except KeyError:
+        pass
+
+    both = log.columns("IMU", ["I", "GyrX"])
+    parts = [log.columns("IMU", ["I", "GyrX"], instance=i) for i in (0, 1)]
+    assert sum(len(p["lineno"]) for p in parts) == len(both["lineno"])
+    for i, p in enumerate(parts):
+        assert np.all(p["I"] == i)
+    merged = np.sort(np.concatenate([p["lineno"] for p in parts]))
+    assert np.array_equal(merged, both["lineno"])
+
+    try:
+        log.columns("ATT", ["Roll"], instance=0)
+        raise AssertionError("expected ValueError")
+    except ValueError:
+        pass
+
+
 def test_time_base():
     log = dflog.LogFile(str(CORPUS / "copter.bin"))
     base = log.time_base()

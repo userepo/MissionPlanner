@@ -97,6 +97,7 @@ fn exercise(data: &[u8]) {
                 if !labels.is_empty() {
                     let _ = columns::get_columns(&log, name, &labels);
                     let _ = columns::get_array_column(&log, name, labels[0]);
+                    let _ = columns::get_columns_filtered(&log, name, &labels, Some(0));
                 }
             }
         }

@@ -142,15 +142,19 @@ impl LogFile {
     }
 
     /// Columnar decode: numpy float64 array per requested field, plus the
-    /// "lineno" int64 array of global record indexes.
+    /// "lineno" int64 array of global record indexes. `instance` limits the
+    /// rows to one instance value (e.g. IMU instance 1).
+    #[pyo3(signature = (type_name, fields, instance=None))]
     fn columns<'py>(
         &self,
         py: Python<'py>,
         type_name: &str,
         fields: Vec<String>,
+        instance: Option<i64>,
     ) -> PyResult<Bound<'py, PyDict>> {
         let refs: Vec<&str> = fields.iter().map(String::as_str).collect();
-        let cols = columns::get_columns(&self.inner, type_name, &refs).map_err(column_err)?;
+        let cols = columns::get_columns_filtered(&self.inner, type_name, &refs, instance)
+            .map_err(column_err)?;
 
         let rows = cols.rows as usize;
         let out = PyDict::new(py);
@@ -164,14 +168,18 @@ impl LogFile {
     }
 
     /// Decode an `a` (int16[32]) field into a rows x 32 numpy int16 array;
-    /// returns (lineno array, samples array).
+    /// returns (lineno array, samples array). `instance` limits the rows to
+    /// one instance value.
+    #[pyo3(signature = (type_name, field, instance=None))]
     fn array_column<'py>(
         &self,
         py: Python<'py>,
         type_name: &str,
         field: &str,
+        instance: Option<i64>,
     ) -> PyResult<ArrayColumnResult<'py>> {
-        let col = columns::get_array_column(&self.inner, type_name, field).map_err(column_err)?;
+        let col = columns::get_array_column_filtered(&self.inner, type_name, field, instance)
+            .map_err(column_err)?;
         let rows = col.rows as usize;
         let elems = col.values.len().checked_div(rows).unwrap_or(32);
 
@@ -200,6 +208,35 @@ impl LogFile {
             pos: 0,
             filter,
         }
+    }
+
+    /// Label of the message's instance field (e.g. "I" for IMU), or None
+    /// when the type is unknown or has no instances.
+    fn instance_field(&self, type_name: &str) -> Option<String> {
+        let &id = self.inner.name_to_id.get(type_name)?;
+        let fmt = self.inner.fmts.get(&id)?;
+        let index = self.units_table().instance_field_index(id)?;
+        fmt.labels.get(index).cloned()
+    }
+
+    /// Sorted distinct instance values present for the message type; empty
+    /// when the type has no instance field.
+    fn instances(&self, type_name: &str) -> PyResult<Vec<i64>> {
+        let Some(label) = self.instance_field(type_name) else {
+            // distinguish "no instances" from "no such type"
+            if !self.inner.name_to_id.contains_key(type_name) {
+                return Err(PyKeyError::new_err(format!(
+                    "unknown message type: {type_name}"
+                )));
+            }
+            return Ok(Vec::new());
+        };
+
+        let cols = columns::get_columns(&self.inner, type_name, &[&label]).map_err(column_err)?;
+        let mut values: Vec<i64> = cols.values.iter().map(|&v| v as i64).collect();
+        values.sort_unstable();
+        values.dedup();
+        Ok(values)
     }
 
     /// GPS wall-clock correlation, or None when the log has no usable fix.

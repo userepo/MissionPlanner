@@ -32,7 +32,9 @@ fn main() -> ExitCode {
             eprintln!("usage: dflog info <log.bin>");
             eprintln!("       dflog dump <log.bin> <TYPE> <FIELD1,FIELD2,...>");
             eprintln!("       dflog convert <log.bin> <out.log>");
-            eprintln!("       dflog parquet <log.bin> <out-dir> [TYPE1,TYPE2,...]");
+            eprintln!(
+                "       dflog parquet <log.bin> <out-dir> [TYPE1,TYPE2,...] [--split-instances]"
+            );
             return ExitCode::from(2);
         }
     };
@@ -52,12 +54,21 @@ fn open(path: &Path) -> Result<LogFile, String> {
 
 #[cfg(feature = "parquet")]
 fn parquet(args: &[String]) -> Result<(), String> {
-    match args {
-        [log, out_dir] => parquet_export::export(Path::new(log), Path::new(out_dir), None),
-        [log, out_dir, types] => {
-            parquet_export::export(Path::new(log), Path::new(out_dir), Some(types))
+    let split_instances = args.iter().any(|a| a == "--split-instances");
+    let args: Vec<&String> = args.iter().filter(|a| *a != "--split-instances").collect();
+    match args.as_slice() {
+        [log, out_dir] => {
+            parquet_export::export(Path::new(log), Path::new(out_dir), None, split_instances)
         }
-        _ => Err("usage: dflog parquet <log.bin> <out-dir> [TYPE1,TYPE2,...]".into()),
+        [log, out_dir, types] => parquet_export::export(
+            Path::new(log),
+            Path::new(out_dir),
+            Some(types),
+            split_instances,
+        ),
+        _ => Err(
+            "usage: dflog parquet <log.bin> <out-dir> [TYPE1,TYPE2,...] [--split-instances]".into(),
+        ),
     }
 }
 

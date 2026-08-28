@@ -14,6 +14,10 @@ log.format("GPS")                        # fields, format chars, units, multipli
 cols = log.columns("ATT", ["TimeUS", "Roll"])   # dict of numpy float64 arrays
 linenos, samples = log.array_column("ISBD", "x") # int16 sample blocks, rows x 32
 
+log.instances("IMU")                     # [0, 1] - distinct instance values
+log.instance_field("IMU")                # "I" (the '#'-unit field), None if none
+gyr1 = log.columns("IMU", ["TimeUS", "GyrX"], instance=1)  # one IMU only
+
 for m in log.messages(types=["ATT", "GPS"]):     # DFReader-ish records
     m["Roll"], m.type, m.lineno, m.time_us
 

@@ -49,6 +49,15 @@ impl UnitsTable {
         self.fmt_unit_ids.is_empty() && self.fmt_mult_ids.is_empty()
     }
 
+    /// index (format order) of the type's instance field - the first field
+    /// whose FMTU unit id is '#'; None when the type has no instances
+    pub fn instance_field_index(&self, type_id: u8) -> Option<usize> {
+        self.fmt_unit_ids
+            .get(&type_id)?
+            .iter()
+            .position(|&c| c == '#')
+    }
+
     /// metadata for field `index` (format order) of message type `type_id`;
     /// fields the log does not annotate come back all-None
     pub fn field_meta(&self, type_id: u8, index: usize) -> FieldMeta {
@@ -127,6 +136,16 @@ impl LogFile {
         let fmt = self.fmts.get(&id)?;
         let index = fmt.labels.iter().position(|l| l == field)?;
         Some(self.units().field_meta(id, index))
+    }
+
+    /// label of the instance field of message `name` (e.g. "I" for IMU), or
+    /// None when the message is unknown or has no instances. Builds the
+    /// units table on each call - cache it for repeated lookups.
+    pub fn instance_field(&self, name: &str) -> Option<String> {
+        let &id = self.name_to_id.get(name)?;
+        let fmt = self.fmts.get(&id)?;
+        let index = self.units().instance_field_index(id)?;
+        fmt.labels.get(index).cloned()
     }
 }
 

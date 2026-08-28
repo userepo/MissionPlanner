@@ -35,6 +35,9 @@ pub enum ColumnError {
     },
     /// FMT format/labels column counts disagree; no stable field mapping
     MalformedFormat(String),
+    /// an instance filter was requested for a type without an instance
+    /// field (no '#' unit id in its FMTU)
+    NoInstanceField(String),
 }
 
 impl std::fmt::Display for ColumnError {
@@ -51,6 +54,9 @@ impl std::fmt::Display for ColumnError {
                 write!(f, "field {field} (format '{code}') is not an int16 array")
             }
             ColumnError::MalformedFormat(t) => write!(f, "malformed FMT for {t}"),
+            ColumnError::NoInstanceField(t) => {
+                write!(f, "message type {t} has no instance field")
+            }
         }
     }
 }
@@ -138,11 +144,68 @@ fn decode(code: char, data: &[u8], at: usize) -> f64 {
     }
 }
 
+/// Row linenos of `id` records, optionally limited to one instance value
+/// (the field whose FMTU unit id is '#', compared on its decoded value).
+fn collect_rows(
+    log: &LogFile,
+    type_name: &str,
+    id: u8,
+    codes: &[char],
+    instance: Option<i64>,
+) -> Result<Vec<u64>, ColumnError> {
+    let instance_at = match instance {
+        None => None,
+        Some(wanted) => {
+            let index = log
+                .units()
+                .instance_field_index(id)
+                .filter(|&index| index < codes.len())
+                .ok_or_else(|| ColumnError::NoInstanceField(type_name.into()))?;
+            let code = codes[index];
+            if field_size(code).is_none() || matches!(code, 'n' | 'N' | 'Z' | 'a') {
+                return Err(ColumnError::NoInstanceField(type_name.into()));
+            }
+            let offset: usize = codes[..index]
+                .iter()
+                .map(|&c| field_size(c).unwrap_or(0))
+                .sum();
+            Some((offset, code, wanted as f64))
+        }
+    };
+
+    let data = log.data();
+    let mut linenos = Vec::new();
+    for (i, &t) in log.index.types.iter().enumerate() {
+        if t != id {
+            continue;
+        }
+        if let Some((offset, code, wanted)) = instance_at {
+            let payload = log.index.offsets[i] as usize + 3;
+            if decode(code, data, payload + offset) != wanted {
+                continue;
+            }
+        }
+        linenos.push(i as u64);
+    }
+    Ok(linenos)
+}
+
 /// Decode `fields` of every `type_name` record in the log.
 pub fn get_columns(
     log: &LogFile,
     type_name: &str,
     fields: &[&str],
+) -> Result<Columns, ColumnError> {
+    get_columns_filtered(log, type_name, fields, None)
+}
+
+/// Decode `fields` of `type_name` records, limited to one `instance` value
+/// when given (e.g. IMU instance 1); the whole log's records when None.
+pub fn get_columns_filtered(
+    log: &LogFile,
+    type_name: &str,
+    fields: &[&str],
+    instance: Option<i64>,
 ) -> Result<Columns, ColumnError> {
     let &id = log
         .name_to_id
@@ -183,12 +246,7 @@ pub fn get_columns(
     }
 
     let data = log.data();
-    let mut linenos = Vec::new();
-    for (i, &t) in log.index.types.iter().enumerate() {
-        if t == id {
-            linenos.push(i as u64);
-        }
-    }
+    let linenos = collect_rows(log, type_name, id, &codes, instance)?;
 
     let rows = linenos.len();
     let mut values = vec![0f64; rows * fields.len()];
@@ -227,6 +285,16 @@ pub fn get_array_column(
     type_name: &str,
     field: &str,
 ) -> Result<ArrayColumn, ColumnError> {
+    get_array_column_filtered(log, type_name, field, None)
+}
+
+/// `get_array_column` limited to one `instance` value when given.
+pub fn get_array_column_filtered(
+    log: &LogFile,
+    type_name: &str,
+    field: &str,
+    instance: Option<i64>,
+) -> Result<ArrayColumn, ColumnError> {
     let &id = log
         .name_to_id
         .get(type_name)
@@ -262,12 +330,7 @@ pub fn get_array_column(
         .sum();
 
     let data = log.data();
-    let mut linenos = Vec::new();
-    for (i, &t) in log.index.types.iter().enumerate() {
-        if t == id {
-            linenos.push(i as u64);
-        }
-    }
+    let linenos = collect_rows(log, type_name, id, &codes, instance)?;
 
     let rows = linenos.len();
     let mut values = vec![0i16; rows * ARRAY_ELEMS];
@@ -291,6 +354,68 @@ pub fn get_array_column(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::path::PathBuf;
+
+    fn corpus(name: &str) -> LogFile {
+        let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../testdata")
+            .join(name);
+        LogFile::open(&path).expect("corpus log")
+    }
+
+    /// per-instance extractions must partition the unfiltered rows exactly
+    #[test]
+    fn instance_filter_partitions_rows() {
+        let log = corpus("copter.bin");
+        let all = get_columns(&log, "IMU", &["I", "GyrX"]).unwrap();
+        let rows = all.rows as usize;
+        assert!(rows > 0);
+
+        let mut instances: Vec<i64> = all.values[..rows].iter().map(|&v| v as i64).collect();
+        instances.sort_unstable();
+        instances.dedup();
+        assert!(
+            instances.len() > 1,
+            "corpus IMU should have multiple instances"
+        );
+
+        let mut filtered_total = 0u64;
+        let mut seen_linenos = Vec::new();
+        for &instance in &instances {
+            let one = get_columns_filtered(&log, "IMU", &["I", "GyrX"], Some(instance)).unwrap();
+            let one_rows = one.rows as usize;
+            // every kept row carries the requested instance value
+            assert!(one.values[..one_rows].iter().all(|&v| v as i64 == instance));
+            filtered_total += one.rows;
+            seen_linenos.extend_from_slice(&one.linenos);
+        }
+
+        assert_eq!(filtered_total, all.rows);
+        seen_linenos.sort_unstable();
+        assert_eq!(seen_linenos, all.linenos);
+    }
+
+    #[test]
+    fn instance_filter_on_type_without_instances_errors() {
+        let log = corpus("copter.bin");
+        // ATT has no '#' unit id in its FMTU
+        assert!(matches!(
+            get_columns_filtered(&log, "ATT", &["Roll"], Some(0)),
+            Err(ColumnError::NoInstanceField(_))
+        ));
+        // an absent instance value filters to zero rows, not an error
+        let none = get_columns_filtered(&log, "IMU", &["GyrX"], Some(99)).unwrap();
+        assert_eq!(none.rows, 0);
+    }
+
+    #[test]
+    fn instance_field_resolution() {
+        let log = corpus("copter.bin");
+        assert_eq!(log.instance_field("IMU").as_deref(), Some("I"));
+        assert_eq!(log.instance_field("GPS").as_deref(), Some("I"));
+        assert_eq!(log.instance_field("ATT"), None);
+        assert_eq!(log.instance_field("NOPE"), None);
+    }
 
     #[test]
     fn half_conversion_basics() {

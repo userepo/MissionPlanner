@@ -123,7 +123,7 @@ impl TypeWriter {
     /// (matching the access layer's first-label-match semantics).
     fn create(
         out_dir: &Path,
-        name: &str,
+        file_stem: &str,
         values: &[(&str, Value)],
         has_time_base: bool,
     ) -> Result<TypeWriter, String> {
@@ -160,7 +160,7 @@ impl TypeWriter {
         }
         let schema = Arc::new(Schema::new(schema_fields));
 
-        let out_path = out_dir.join(format!("{name}.parquet"));
+        let out_path = out_dir.join(format!("{file_stem}.parquet"));
         let file = File::create(&out_path).map_err(|e| format!("{}: {e}", out_path.display()))?;
         let writer =
             ArrowWriter::try_new(file, Arc::clone(&schema), None).map_err(|e| e.to_string())?;
@@ -248,10 +248,18 @@ impl TypeWriter {
 
 /// Export one parquet file per message type into `out_dir`; `types` limits
 /// the export (comma-separated names, error on unknown), None means every
-/// type that appears in the log.
-pub fn export(path: &Path, out_dir: &Path, types: Option<&str>) -> Result<(), String> {
+/// type that appears in the log. With `split_instances`, a type with an
+/// instance field ('#' unit id) writes one file per instance value
+/// (`IMU_0.parquet`, `IMU_1.parquet`) instead of one interleaved table.
+pub fn export(
+    path: &Path,
+    out_dir: &Path,
+    types: Option<&str>,
+    split_instances: bool,
+) -> Result<(), String> {
     let log = LogFile::open(path).map_err(|e| format!("{}: {e}", path.display()))?;
     let time_base = log.time_base();
+    let units = log.units();
 
     let selected: Option<Vec<u8>> = match types {
         Some(csv) => {
@@ -270,7 +278,12 @@ pub fn export(path: &Path, out_dir: &Path, types: Option<&str>) -> Result<(), St
 
     std::fs::create_dir_all(out_dir).map_err(|e| format!("{}: {e}", out_dir.display()))?;
 
-    let mut writers: HashMap<u8, TypeWriter> = HashMap::new();
+    // per type: label of its instance field, resolved once ('#' unit id);
+    // matched against `values()` output by name because that output skips
+    // undecodable fields and format-order indexes may not line up
+    let mut instance_labels: HashMap<u8, Option<String>> = HashMap::new();
+
+    let mut writers: HashMap<(u8, Option<i64>), TypeWriter> = HashMap::new();
     for record in log.records() {
         let id = record.fmt.id;
         if let Some(ids) = &selected {
@@ -284,21 +297,50 @@ pub fn export(path: &Path, out_dir: &Path, types: Option<&str>) -> Result<(), St
         }
 
         let values = record.values();
-        let writer = match writers.entry(id) {
+
+        let instance = if split_instances {
+            let label = instance_labels.entry(id).or_insert_with(|| {
+                units
+                    .instance_field_index(id)
+                    .and_then(|index| record.fmt.labels.get(index).cloned())
+            });
+            // a record whose instance field failed to decode (truncated
+            // payload) lands in the unsuffixed file
+            label.as_ref().and_then(|label| {
+                values
+                    .iter()
+                    .find(|(name, _)| name == label)
+                    .and_then(|(_, value)| value.as_f64())
+                    .map(|v| v as i64)
+            })
+        } else {
+            None
+        };
+
+        let writer = match writers.entry((id, instance)) {
             Entry::Occupied(e) => e.into_mut(),
-            Entry::Vacant(e) => e.insert(TypeWriter::create(
-                out_dir,
-                record.type_name(),
-                &values,
-                time_base.is_some(),
-            )?),
+            Entry::Vacant(e) => {
+                let file_stem = match instance {
+                    Some(instance) => format!("{}_{instance}", record.type_name()),
+                    None => record.type_name().to_string(),
+                };
+                e.insert(TypeWriter::create(
+                    out_dir,
+                    &file_stem,
+                    &values,
+                    time_base.is_some(),
+                )?)
+            }
         };
         writer.append(record.lineno, &values, time_base.as_ref())?;
     }
 
     let mut names: Vec<(String, u64)> = Vec::new();
-    for (id, writer) in writers {
-        let name = log.fmts[&id].name.clone();
+    for ((id, instance), writer) in writers {
+        let name = match instance {
+            Some(instance) => format!("{}_{instance}", log.fmts[&id].name),
+            None => log.fmts[&id].name.clone(),
+        };
         let rows = writer.finish()?;
         names.push((name, rows));
     }

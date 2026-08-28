@@ -41,7 +41,7 @@ fn read_all(path: &PathBuf) -> Vec<arrow_array::RecordBatch> {
 #[test]
 fn att_columns_round_trip_bitwise() {
     let dir = export_dir("att");
-    parquet_export::export(&testdata("copter.bin"), &dir, Some("ATT")).expect("export");
+    parquet_export::export(&testdata("copter.bin"), &dir, Some("ATT"), false).expect("export");
 
     let log = LogFile::open(&testdata("copter.bin")).unwrap();
     let expected = columns::get_columns(&log, "ATT", &["TimeUS", "Roll", "Pitch"]).unwrap();
@@ -85,7 +85,7 @@ fn att_columns_round_trip_bitwise() {
 #[test]
 fn time_utc_matches_time_base() {
     let dir = export_dir("time");
-    parquet_export::export(&testdata("copter.bin"), &dir, Some("ATT")).expect("export");
+    parquet_export::export(&testdata("copter.bin"), &dir, Some("ATT"), false).expect("export");
 
     let log = LogFile::open(&testdata("copter.bin")).unwrap();
     let base = log.time_base().expect("corpus log has a time base");
@@ -117,7 +117,8 @@ fn time_utc_matches_time_base() {
 #[test]
 fn strings_and_arrays_round_trip() {
     let dir = export_dir("mixed");
-    parquet_export::export(&testdata("copter-isbd.bin"), &dir, Some("MSG,ISBD")).expect("export");
+    parquet_export::export(&testdata("copter-isbd.bin"), &dir, Some("MSG,ISBD"), false)
+        .expect("export");
 
     let log = LogFile::open(&testdata("copter-isbd.bin")).unwrap();
 
@@ -171,13 +172,69 @@ fn strings_and_arrays_round_trip() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// --split-instances writes one file per IMU instance whose rows match the
+/// instance-filtered columnar extraction exactly
+#[test]
+fn split_instances_partitions_imu() {
+    let dir = export_dir("split");
+    parquet_export::export(&testdata("copter.bin"), &dir, Some("IMU"), true).expect("export");
+
+    let log = LogFile::open(&testdata("copter.bin")).unwrap();
+    let all = columns::get_columns(&log, "IMU", &["GyrX"]).unwrap();
+
+    assert!(
+        !dir.join("IMU.parquet").exists(),
+        "split export must not also write the interleaved file"
+    );
+
+    let mut total = 0u64;
+    for instance in [0i64, 1] {
+        let expected =
+            columns::get_columns_filtered(&log, "IMU", &["GyrX"], Some(instance)).unwrap();
+        assert!(
+            expected.rows > 0,
+            "corpus IMU should have instance {instance}"
+        );
+
+        let batches = read_all(&dir.join(format!("IMU_{instance}.parquet")));
+        let rows: usize = batches.iter().map(|b| b.num_rows()).sum();
+        assert_eq!(rows as u64, expected.rows, "instance {instance}");
+
+        let mut row = 0usize;
+        for batch in &batches {
+            let lineno = batch
+                .column_by_name("lineno")
+                .unwrap()
+                .as_any()
+                .downcast_ref::<UInt64Array>()
+                .unwrap();
+            let gyrx = batch
+                .column_by_name("GyrX")
+                .unwrap()
+                .as_any()
+                .downcast_ref::<Float64Array>()
+                .unwrap();
+            for i in 0..batch.num_rows() {
+                assert_eq!(lineno.value(i), expected.linenos[row]);
+                assert_eq!(gyrx.value(i), expected.values[row]);
+                row += 1;
+            }
+        }
+        total += expected.rows;
+    }
+
+    assert_eq!(total, all.rows, "instances must partition the rows");
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 /// every corpus log exports every type without error, with row counts
 /// matching the record index
 #[test]
 fn full_export_row_counts_match_index() {
     for name in ["copter.bin", "plane.bin", "rover.bin", "copter-isbd.bin"] {
         let dir = export_dir(name);
-        parquet_export::export(&testdata(name), &dir, None).expect(name);
+        parquet_export::export(&testdata(name), &dir, None, false).expect(name);
 
         let log = LogFile::open(&testdata(name)).unwrap();
         let mut expected = 0u64;
