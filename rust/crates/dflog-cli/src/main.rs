@@ -22,7 +22,23 @@ use dflog_core::{columns, render, LogFile};
 #[cfg(feature = "parquet")]
 mod parquet_export;
 
+/// Restores the default SIGPIPE disposition so `dflog info x | head` dies
+/// quietly when the reader closes the pipe. Rust ignores SIGPIPE at startup,
+/// which turns the closed pipe into an EPIPE panic inside `println!`.
+#[cfg(unix)]
+fn reset_sigpipe() {
+    // SAFETY: replacing the disposition of SIGPIPE with the process default
+    // before any other thread exists has no preconditions to uphold.
+    unsafe {
+        libc::signal(libc::SIGPIPE, libc::SIG_DFL);
+    }
+}
+
+#[cfg(not(unix))]
+fn reset_sigpipe() {}
+
 fn main() -> ExitCode {
+    reset_sigpipe();
     let args: Vec<String> = std::env::args().skip(1).collect();
     let result = match args.as_slice() {
         [cmd, log] if cmd == "info" => info(Path::new(log)),

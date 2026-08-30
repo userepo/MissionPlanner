@@ -237,32 +237,33 @@ checksum = "460fbee9c2c2f33933d720630a6a0bac33ba7053db5344fac858d4b8952d77d5"
 
 [[package]]
 name = "dflog-cli"
-version = "0.7.0"
+version = "0.7.1"
 dependencies = [
  "arrow-array",
  "arrow-schema",
  "dflog-core",
+ "libc",
  "memmap2",
  "parquet",
 ]
 
 [[package]]
 name = "dflog-core"
-version = "0.7.0"
+version = "0.7.1"
 dependencies = [
  "memmap2",
 ]
 
 [[package]]
 name = "dflog-ffi"
-version = "0.7.0"
+version = "0.7.1"
 dependencies = [
  "dflog-core",
 ]
 
 [[package]]
 name = "dflog-py"
-version = "0.7.0"
+version = "0.7.1"
 dependencies = [
  "dflog-core",
  "numpy",
