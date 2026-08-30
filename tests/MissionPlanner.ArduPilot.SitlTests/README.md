@@ -78,7 +78,18 @@ Then point the harness at port 5770. The download is expected to be slower
 (one round-trip per scattered missing block) but still byte-identical to the
 oracle. The proxy prints how many frames it saw and dropped on exit.
 
-## Reference results (2026-08-26, 2.3 MB log, WSL2 loopback)
+## Reference results (2026-08-29, 2.3 MB log, WSL2 loopback)
 
 - clean link: 2,306,048 bytes in ~0.45 s (~5 MiB/s), byte-identical
-- 5% LOG_DATA loss: byte-identical in ~55 s (1,348 of 26,971 frames dropped)
+- 5% LOG_DATA loss: byte-identical in ~58 s, one streaming pass
+  (1,348 of 26,971 frames dropped; the extra ~3 s over the earlier ~55 s
+  reference is one silence window confirming the end of log, whose packet
+  arrives far past a frontier stalled at the first dropped block)
+
+The lossy run is the reason this harness exists: a 5% loss stalls the
+contiguous frontier near the start of the log, so the genuine end packet
+of a large log arrives far past any near-frontier trust window - a case
+the unit tests cannot represent because their logs are smaller than the
+window itself. A fix that rejected such end packets outright passed the
+whole unit suite and never completed here: every recovered gap forced the
+vehicle to re-stream the entire log.

@@ -6053,6 +6053,9 @@ Mission Planner waits for 2 valid heartbeat packets before connecting
 
                     uint totallength = 0;
                     uint maxEnd = 0;
+                    // end-of-log candidate from a short packet past the trusted window,
+                    // kept only while nothing arrives after it
+                    uint pendingEnd = 0;
                     uint ofs = 0;
                     uint bps = 0;
                     DateTime bpstimer = DateTime.Now;
@@ -6077,6 +6080,18 @@ Mission Planner waits for 2 valid heartbeat packets before connecting
                         // false means LogDataTimeoutMs of silence - resend the request
                         if (!await queueSignal.WaitAsync(LogDataTimeoutMs, cancel).ConfigureAwait(false))
                         {
+                            // the stream went quiet right after an end candidate from past the
+                            // trusted window - that silence is the missing evidence: a corrupt
+                            // packet is followed by more stream, the real end of log is not.
+                            // accept it and let the fill-in phase repair the gaps
+                            if (pendingEnd > 0)
+                            {
+                                totallength = Math.Max(pendingEnd, maxEnd);
+                                log.Info("start fillin len " + totallength + " count " + set.Count +
+                                         " (end past stalled frontier)");
+                                break;
+                            }
+
                             if (retrys > 0)
                             {
                                 log.Info("GetLog Retry " + retrys + " - giv com " + giveComport);
@@ -6106,19 +6121,21 @@ Mission Planner waits for 2 valid heartbeat packets before connecting
                                 if (data.count > data.data.Length)
                                     continue;
 
-                                // reset retrys
-                                retrys = 3;
-
                                 bps += data.count;
 
                                 // record what we have received
-                                set.Add(data.ofs / 90);
+                                bool newBlock = set.Add(data.ofs / 90);
                                 while (set.Contains(lowestMissing))
                                     lowestMissing++;
-                                // only packets near the contiguous frontier raise the bar the
-                                // end packet must clear - a corrupt far offset must not poison
-                                // end-of-log detection for the whole download
-                                if (data.ofs <= (ulong) lowestMissing * 90 + endDetectionSlack)
+                                // only fresh data earns more patience - a packet resent every
+                                // retry window must not keep the streaming phase alive forever
+                                if (newBlock)
+                                    retrys = 3;
+                                // only packets near the contiguous frontier are trusted with
+                                // protocol state - a corrupt far offset must not raise the
+                                // end-of-log bar, move the retry offset or end the download
+                                bool nearFrontier = data.ofs <= (ulong) lowestMissing * 90 + endDetectionSlack;
+                                if (nearFrontier)
                                     maxEnd = Math.Max(maxEnd, data.ofs + data.count);
 
                                 if (ms.Position != data.ofs)
@@ -6126,7 +6143,8 @@ Mission Planner waits for 2 valid heartbeat packets before connecting
                                 ms.Write(data.data, 0, data.count);
 
                                 // update new start point
-                                req.ofs = data.ofs + data.count;
+                                if (nearFrontier)
+                                    req.ofs = data.ofs + data.count;
 
                                 if (bpstimer.Second != DateTime.Now.Second)
                                 {
@@ -6140,16 +6158,30 @@ Mission Planner waits for 2 valid heartbeat packets before connecting
                                     bps = 0;
                                 }
 
-                                // a short or empty packet ends the log, but only trust it at the highest
-                                // offset seen - a reordered short packet must not truncate the download.
-                                // the length comes from the end packet itself: the bar can lag behind
-                                // a stalled frontier and must not stand in for the real log length
+                                // a short or empty packet ends the log, but only trust it at the
+                                // highest offset seen - a reordered short packet must not truncate
+                                // the download
                                 if (data.count < 90 && data.ofs + data.count >= maxEnd)
                                 {
-                                    totallength = data.ofs + data.count;
-                                    log.Info("start fillin len " + totallength + " count " + set.Count + " datalen " +
-                                             data.count);
-                                    break;
+                                    if (nearFrontier)
+                                    {
+                                        totallength = data.ofs + data.count;
+                                        log.Info("start fillin len " + totallength + " count " + set.Count +
+                                                 " datalen " + data.count);
+                                        break;
+                                    }
+
+                                    // past the trusted window it clears the bar trivially, so it is
+                                    // only a candidate: packet loss can stall the frontier far behind
+                                    // a genuine end, but a corrupt packet short by chance looks the
+                                    // same. defer to the silence check - the largest of a final run
+                                    // of candidates, so a smaller corrupt one cannot truncate the log
+                                    pendingEnd = Math.Max(pendingEnd, data.ofs + data.count);
+                                }
+                                else
+                                {
+                                    // the stream continued, so any prior end candidate was corrupt
+                                    pendingEnd = 0;
                                 }
                             }
                         }

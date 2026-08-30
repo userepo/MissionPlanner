@@ -279,6 +279,144 @@ namespace MissionPlanner.ArduPilot.Tests
         }
 
         [Fact]
+        public async Task CorruptShortFarPacketDoesNotEndTheDownload()
+        {
+            var log = MakeLog(1234);
+            using (var vehicle = new FakeLogVehicle(log))
+            {
+                var corruptSent = false;
+                vehicle.OnRequest = req =>
+                {
+                    var end = Math.Min((ulong)req.ofs + req.count, (ulong)log.Length);
+                    for (var ofs = (ulong)req.ofs; ofs < end; ofs += BlockSize)
+                    {
+                        // a packet that is both short and at a far offset clears the
+                        // end-of-log bar trivially - it must not terminate the stream
+                        // at a phantom length
+                        if (ofs == 5 * BlockSize && !corruptSent)
+                        {
+                            corruptSent = true;
+                            vehicle.Send(MAVLink.MAVLINK_MSG_ID.LOG_DATA,
+                                new MAVLink.mavlink_log_data_t(1_000_000, LogId, 40,
+                                    new byte[BlockSize]));
+                        }
+
+                        vehicle.SendBlock((uint)ofs, (int)Math.Min(BlockSize, end - ofs));
+                    }
+                };
+
+                var result = await Download(vehicle, TestContext.Current.CancellationToken);
+
+                Assert.True(result.Length == log.Length,
+                    $"corrupt short far packet ended the download at a phantom length: " +
+                    $"{result.Length} != {log.Length}");
+                Assert.Equal(log, result);
+            }
+        }
+
+        [Fact]
+        public async Task CorruptFarPacketDoesNotHijackRetryOffset()
+        {
+            var log = MakeLog(1234);
+            using (var vehicle = new FakeLogVehicle(log))
+            {
+                var first = true;
+                vehicle.OnRequest = req =>
+                {
+                    if (!first)
+                    {
+                        vehicle.Serve(req);
+                        return;
+                    }
+
+                    // stream five blocks, inject a corrupt far packet, then go silent -
+                    // the streaming retry must resume from the true stream position,
+                    // not from past the corrupt offset
+                    first = false;
+                    for (var ofs = 0u; ofs < 5 * BlockSize; ofs += BlockSize)
+                        vehicle.SendBlock(ofs, BlockSize);
+                    vehicle.Send(MAVLink.MAVLINK_MSG_ID.LOG_DATA,
+                        new MAVLink.mavlink_log_data_t(1_000_000, LogId, BlockSize,
+                            new byte[BlockSize]));
+                };
+
+                var result = await Download(vehicle, TestContext.Current.CancellationToken);
+
+                Assert.Equal(log, result);
+                lock (vehicle.Requests)
+                {
+                    Assert.True(vehicle.Requests.Any(r => r.ofs == 5 * BlockSize),
+                        "retry did not resume from the true stream position");
+                    Assert.False(vehicle.Requests.Any(r => r.ofs > (uint)log.Length),
+                        "retry requested data past the corrupt offset");
+                }
+            }
+        }
+
+        [Fact]
+        public async Task RepeatedStaleDataDoesNotKeepTheStreamAliveForever()
+        {
+            var log = MakeLog(1000);
+            using (var vehicle = new FakeLogVehicle(log))
+            using (var dir = new TestDir())
+            {
+                var first = true;
+                vehicle.OnRequest = req =>
+                {
+                    if (first)
+                    {
+                        // stream only the first three blocks, then answer every retry
+                        // with a stale duplicate - it brings no new data, so it must
+                        // not keep resetting the retry budget forever
+                        first = false;
+                        for (var ofs = 0u; ofs < 3 * BlockSize; ofs += BlockSize)
+                            vehicle.SendBlock(ofs, BlockSize);
+                        return;
+                    }
+
+                    vehicle.SendBlock(0, BlockSize);
+                };
+
+                using (var guard = new CancellationTokenSource(30000))
+                using (var linked = CancellationTokenSource.CreateLinkedTokenSource(
+                    guard.Token, TestContext.Current.CancellationToken))
+                {
+                    var path = dir.File("log.bin");
+
+                    await Assert.ThrowsAsync<TimeoutException>(
+                        () => vehicle.Mav.GetLogInternal(VehicleSysid, VehicleCompid, LogId,
+                            path, linked.Token));
+
+                    Assert.False(guard.IsCancellationRequested,
+                        "download looped instead of timing out");
+                }
+            }
+        }
+
+        [Fact]
+        public async Task EndMarkerBeyondStalledFrontierCompletesViaFillin()
+        {
+            // an early drop stalls the contiguous frontier while the log is large
+            // enough that the genuine end packet sits far past its trust window -
+            // the end must still hand over to the fill-in phase, not force the
+            // whole stream to be sent again
+            var log = MakeLog(12000);
+            using (var vehicle = new FakeLogVehicle(log))
+            {
+                var drop = new HashSet<uint> { 3 };
+                vehicle.OnRequest = req => vehicle.Serve(req, drop);
+
+                var result = await Download(vehicle, TestContext.Current.CancellationToken);
+
+                Assert.Equal(log, result);
+                lock (vehicle.Requests)
+                    Assert.True(vehicle.Requests.Count <= 4,
+                        $"{vehicle.Requests.Count} requests for one dropped block - the " +
+                        "far end marker is forcing full re-streams");
+            }
+        }
+
+        [Fact]
         public async Task IgnoresPacketWithOversizedCount()
         {
             var log = MakeLog(1234);
